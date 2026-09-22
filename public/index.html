@@ -4,41 +4,93 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Juegos 4°</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <meta name="theme-color" content="#F3F5F9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#161A26" media="(prefers-color-scheme: dark)" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap"
-      rel="stylesheet"
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -34.25 108 108'%3E%3Cpath d='M0,0 c25,-22 71,-22 96,0 H96 a4,4 0 0 1 4,4 V44 a4,4 0 0 1 -4,4 H48 c-2,0 -3,1 -4,2 l-4,4 c-1,1 -2,2 -4,2 h-12 c-2,0 -3,-1 -4,-2 l-4,-4 c-1,-1 -2,-2 -4,-2 H4 a4,4 0 0 1 -4,-4 Z' fill='%23FFBF00' stroke='%23CC9900' stroke-width='4'/%3E%3C/svg%3E"
     />
+    <link rel="preload" href="fonts/dynapuff-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="styles.css?v=__V__" />
     <script type="module" src="app.js?v=__V__"></script>
   </head>
   <body>
-    <nav class="grades" role="tablist" aria-label="Grados">
-      <button class="grade" type="button" role="tab" aria-selected="false" data-grade="4N">4N</button>
-      <button class="grade" type="button" role="tab" aria-selected="false" data-grade="4F">4F</button>
-      <button class="grade" type="button" role="tab" aria-selected="false" data-grade="4S">4S</button>
-    </nav>
+    <!-- Phosphor Icons (MIT), inlined from @phosphor-icons/core. -->
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <symbol id="i-link" viewBox="0 0 256 256">
+        <path d="M87.5,151.52l64-64a12,12,0,0,1,17,17l-64,64a12,12,0,0,1-17-17Zm131-114a60.08,60.08,0,0,0-84.87,0L103.51,67.61a12,12,0,0,0,17,17l30.07-30.06a36,36,0,0,1,50.93,50.92L171.4,135.52a12,12,0,1,0,17,17l30.08-30.06A60.09,60.09,0,0,0,218.45,37.55ZM135.52,171.4l-30.07,30.08a36,36,0,0,1-50.92-50.93l30.06-30.07a12,12,0,0,0-17-17L37.55,133.58a60,60,0,0,0,84.88,84.87l30.06-30.07a12,12,0,0,0-17-17Z" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 256 256">
+        <path d="M228,128a12,12,0,0,1-12,12H140v76a12,12,0,0,1-24,0V140H40a12,12,0,0,1,0-24h76V40a12,12,0,0,1,24,0v76h76A12,12,0,0,1,228,128Z" />
+      </symbol>
+      <symbol id="i-flag" viewBox="0 0 256 256">
+        <path d="M232,56V176a8,8,0,0,1-2.76,6c-15.28,13.23-29.89,18-43.82,18-18.91,0-36.57-8.74-53-16.85C105.87,170,82.79,158.61,56,179.77V224a8,8,0,0,1-16,0V56a8,8,0,0,1,2.77-6h0c36-31.18,68.31-15.21,96.79-1.12C167,62.46,190.79,74.2,218.76,50A8,8,0,0,1,232,56Z" />
+      </symbol>
+      <symbol id="i-stop" viewBox="0 0 256 256">
+        <path d="M227.31,80.23,175.77,28.69A16.13,16.13,0,0,0,164.45,24H91.55a16.13,16.13,0,0,0-11.32,4.69L28.69,80.23A16.13,16.13,0,0,0,24,91.55v72.9a16.13,16.13,0,0,0,4.69,11.32l51.54,51.54A16.13,16.13,0,0,0,91.55,232h72.9a16.13,16.13,0,0,0,11.32-4.69l51.54-51.54A16.13,16.13,0,0,0,232,164.45V91.55A16.13,16.13,0,0,0,227.31,80.23Z" />
+      </symbol>
+      <symbol id="i-up" viewBox="0 0 256 256">
+        <path d="M208.49,120.49a12,12,0,0,1-17,0L140,69V216a12,12,0,0,1-24,0V69L64.49,120.49a12,12,0,0,1-17-17l72-72a12,12,0,0,1,17,0l72,72A12,12,0,0,1,208.49,120.49Z" />
+      </symbol>
+    </svg>
 
-    <form class="add">
-      <input
-        class="url"
-        type="text"
-        name="url"
-        inputmode="url"
-        autocomplete="off"
-        required
-        placeholder="Pegá el link de tu juego"
-        aria-label="Link de tu juego"
-      />
-      <button class="submit" type="submit">
-        <span aria-hidden="true">+</span>
-        <span class="sr-only">Agregar</span>
-      </button>
-    </form>
+    <main class="landing" hidden>
+      <h1 class="sr-only">Juegos de Scratch de 4°</h1>
+      <div class="hats" role="group" aria-label="Elegí tu grado">
+        <button class="block hat pick" type="button" data-g="4N">4N</button>
+        <button class="block hat pick" type="button" data-g="4F">4F</button>
+        <button class="block hat pick" type="button" data-g="4S">4S</button>
+      </div>
+    </main>
 
-    <p class="msg" role="status" aria-live="polite"></p>
+    <main class="board" hidden>
+      <header class="top">
+        <div class="palette" role="group" aria-label="Cambiar de grado">
+          <button class="chip" type="button" data-g="4N" aria-pressed="false">4N</button>
+          <button class="chip" type="button" data-g="4F" aria-pressed="false">4F</button>
+          <button class="chip" type="button" data-g="4S" aria-pressed="false">4S</button>
+        </div>
 
-    <main class="grid"></main>
+        <div class="script">
+          <div class="stack">
+            <h1 class="block hat head" tabindex="-1">
+              <span class="sr-only">Juegos de </span><span class="hat-label"></span>
+            </h1>
+            <form class="block cmd add" novalidate>
+              <span class="lead" aria-hidden="true">
+                <svg class="icon"><use href="#i-link" /></svg>
+                <img class="peek" alt="" width="144" height="108" hidden />
+              </span>
+              <input
+                class="slot"
+                type="text"
+                name="url"
+                inputmode="url"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="Pegá el link de tu juego"
+                aria-label="Link de tu juego"
+              />
+              <button class="go" type="submit" aria-label="Agregar juego">
+                <svg class="icon" aria-hidden="true"><use href="#i-plus" /></svg>
+              </button>
+            </form>
+          </div>
+
+          <div class="say" hidden>
+            <svg class="icon stop" aria-hidden="true"><use href="#i-stop" /></svg>
+            <p class="say-text" id="say-text"></p>
+          </div>
+        </div>
+      </header>
+
+      <section class="games" aria-label="Juegos" aria-busy="false">
+        <ul class="grid" role="list"></ul>
+      </section>
+    </main>
+
+    <p class="sr-only" role="status" aria-live="polite" id="live"></p>
   </body>
 </html>
