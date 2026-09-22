@@ -4,7 +4,7 @@ COPY package.json ./
 COPY server.js ./
 COPY public ./public
 # Cache-bust static asset URLs at build time (Cloudflare caches them by URL)
-RUN V=$(date +%s) && sed -i "s/__V__/$V/g" public/index.html
+RUN V=$(date +%s) && sed -i "s/__V__/$V/g" public/index.html public/admin.html
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV DATA_DIR=/data

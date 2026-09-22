@@ -1,0 +1,615 @@
+/* Admin panel. Builds on styles.css (tokens, font, blocks, say bubble, dark mode). */
+
+.admin {
+  --surface: #ffffff;
+  --flash: rgb(15 189 140 / 0.16);
+  --danger: #cc3333;
+  --pip-ring: rgb(46 52 80 / 0.24);
+}
+
+@media (prefers-color-scheme: dark) {
+  .admin {
+    --surface: #1c2130;
+    --flash: rgb(15 189 140 / 0.2);
+    --pip-ring: rgb(255 255 255 / 0.22);
+  }
+}
+
+/* Admin blocks use Scratch's extension teal, so they never read as a grade. */
+.tool {
+  --fill: #0fbd8c;
+  --edge: #0b8e69;
+  --deep: #06533e;
+  --on: #083528;
+  --on-deep: #ffffff;
+  --slot-edge: #075c44;
+}
+
+/* ---------- Login ---------- */
+
+.gate {
+  --s: 1.5;
+  --cap: calc(17px * var(--s));
+  --slot-h: 48px;
+  min-height: 100dvh;
+  display: grid;
+  /* minmax(0, …) lets the input shrink on small phones instead of pushing the block out. */
+  grid-template-columns: minmax(0, 500px);
+  place-content: center;
+  padding: 32px 16px 14vh;
+}
+
+.login {
+  gap: calc(8px * var(--s));
+  padding: calc(8px * var(--s)) calc(8px * var(--s)) calc(8px * var(--s)) calc(13px * var(--s));
+}
+
+.lock {
+  width: 30px;
+  height: 30px;
+}
+
+.enter {
+  flex: none;
+  height: var(--slot-h);
+  padding: 0 20px;
+  border-radius: 999px;
+  background: var(--deep);
+  color: var(--on-deep);
+  font-size: 18px;
+  font-weight: 700;
+  transition: scale 160ms var(--spring);
+}
+
+@media (hover: hover) {
+  .enter:hover {
+    scale: 1.04;
+  }
+}
+
+.enter:active {
+  scale: 0.95;
+}
+
+/* Dark rings read on teal in both color schemes. */
+.tool :focus-visible {
+  outline-color: #2e3450;
+}
+
+.enter[aria-disabled='true'] {
+  cursor: progress;
+}
+
+/* ---------- Panel ---------- */
+
+.panel {
+  --s: 1;
+  --cap: calc(17px * var(--s));
+  max-width: 980px;
+  margin-inline: auto;
+  padding: clamp(20px, 4vw, 44px) clamp(14px, 4vw, 40px) 96px;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: var(--cap);
+}
+
+.out {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 18px 0 14px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px var(--hair);
+  color: var(--ink-2);
+  font-size: 16px;
+}
+
+.out .icon {
+  width: 20px;
+  height: 20px;
+}
+
+@media (hover: hover) {
+  .out:hover {
+    background: var(--well);
+    color: var(--ink);
+  }
+}
+
+/* Filters, drawn like Scratch's category palette: a circle over its name. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 26px;
+}
+
+.filter {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 6px;
+  min-width: 64px;
+  padding: 6px 6px 4px;
+  border-radius: 14px;
+}
+
+.filter .dot {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--fill);
+  box-shadow: inset 0 0 0 2px var(--edge);
+  color: var(--on);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1;
+  transition:
+    translate 200ms var(--spring),
+    box-shadow 200ms ease;
+}
+
+/* "Todos" is a ring of the three grade colors. */
+.filter .dot.all {
+  background:
+    radial-gradient(closest-side, var(--surface) 72%, transparent 74%),
+    conic-gradient(from -60deg, #4592fb 0 33.3%, #9966ff 0 66.6%, #ffab19 0);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.filter .label {
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.filter[aria-pressed='true'] .dot {
+  box-shadow:
+    inset 0 0 0 2px var(--edge),
+    0 0 0 3px var(--paper),
+    0 0 0 6px var(--mark);
+}
+
+.filter[aria-pressed='true'] .dot.all {
+  box-shadow:
+    0 0 0 3px var(--paper),
+    0 0 0 6px var(--mark);
+}
+
+.filter[aria-pressed='true'] .label {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+@media (hover: hover) {
+  .filter[aria-pressed='false']:hover .dot {
+    translate: 0 -2px;
+  }
+}
+
+/* ---------- List ---------- */
+
+.sheet {
+  margin-top: 20px;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--hair);
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+}
+
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto auto;
+  grid-template-areas: 'thumb info mover acts';
+  align-items: center;
+  column-gap: 16px;
+  padding: 10px 12px 10px 16px;
+  transition: opacity 160ms ease 120ms;
+}
+
+.row + .row {
+  box-shadow: 0 -1px 0 var(--hair);
+}
+
+/* Soft wash that confirms a change, faded out by admin.js. */
+.row::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--flash);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.row.busy {
+  opacity: 0.55;
+}
+
+.thumb {
+  grid-area: thumb;
+  position: relative;
+  display: block;
+  width: 64px;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  background: var(--well);
+  color: #2e3450;
+}
+
+.thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.thumb::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--hair);
+  pointer-events: none;
+}
+
+/* "Open in Scratch" badge, shown when the thumbnail is hovered or focused. */
+.thumb .open {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(20 24 40 / 0.3);
+  translate: -50% -50%;
+  scale: 0.5;
+  opacity: 0;
+  transition:
+    scale 220ms var(--spring),
+    opacity 120ms ease;
+}
+
+.thumb:focus-visible .open {
+  scale: 1;
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .thumb:hover .open {
+    scale: 1;
+    opacity: 1;
+  }
+}
+
+.info {
+  grid-area: info;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.row-title {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.row-meta {
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--ink-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Move: three grade circles in a fixed order; the filled one is where the game is now. */
+.mover {
+  grid-area: mover;
+  display: flex;
+}
+
+.pip {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+}
+
+/* Targets stay quiet until pointed at, so each row shows one strong color: its grade. */
+.pip > span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px var(--pip-ring);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  transition:
+    background-color 160ms ease,
+    scale 200ms var(--spring);
+}
+
+.pip.now > span {
+  background: var(--deep);
+  box-shadow: none;
+  color: var(--on-deep);
+}
+
+button.pip:focus-visible > span {
+  box-shadow: inset 0 0 0 2px var(--mark);
+  color: var(--mark);
+}
+
+@media (hover: hover) {
+  button.pip:hover > span {
+    background: color-mix(in srgb, var(--mark) 14%, transparent);
+    box-shadow: inset 0 0 0 2px var(--mark);
+    color: var(--mark);
+    scale: 1.08;
+  }
+}
+
+button.pip:active > span {
+  scale: 0.9;
+}
+
+.acts {
+  grid-area: acts;
+  position: relative;
+  display: flex;
+  gap: 8px;
+}
+
+.act {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--ink-2);
+}
+
+.act .icon {
+  width: 20px;
+  height: 20px;
+}
+
+@media (hover: hover) {
+  .act:hover {
+    background: var(--well);
+    color: var(--ink);
+  }
+}
+
+.act.save {
+  background: #06533e;
+  color: #fff;
+}
+
+@media (hover: hover) {
+  .act.save:hover {
+    background: #06533e;
+    color: #fff;
+    scale: 1.06;
+  }
+}
+
+/* Two-tap delete: the first tap grows a red "¿Seguro?" over the edit button. */
+.sure {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  translate: 0 -50%;
+  transform-origin: right center;
+  scale: 0.5;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    scale 220ms var(--spring),
+    opacity 120ms ease;
+}
+
+/* Time left before the confirm goes away. */
+.sure::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 7px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.7);
+  transform-origin: left center;
+}
+
+.del.confirming .sure {
+  scale: 1;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.del.confirming .sure::after {
+  animation: countdown 3s linear forwards;
+}
+
+@keyframes countdown {
+  to {
+    scale: 0 1;
+  }
+}
+
+.del.confirming:focus-visible {
+  outline: none;
+}
+
+.del.confirming:focus-visible .sure {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* Inline edit */
+.row.editing {
+  align-items: start;
+}
+
+.row.editing .info {
+  gap: 8px;
+}
+
+.row.editing .mover,
+.row.editing .acts {
+  margin-top: 2px;
+}
+
+.field {
+  width: 100%;
+  height: 44px;
+  padding: 0 16px;
+  border: 2px solid #858ea4;
+  border-radius: 999px;
+  background: #fff;
+  color: #2e3450;
+  font-size: 16px;
+}
+
+.field::placeholder {
+  color: #575e75;
+  opacity: 1;
+}
+
+.field:focus-visible {
+  outline-offset: 2px;
+}
+
+.field[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+/* The say bubble can sit inside a row, under what it talks about. */
+.row > .say {
+  grid-column: 2 / -1;
+  margin: 24px 0 4px;
+}
+
+.row > .say.end {
+  justify-self: end;
+}
+
+/* A field error sits right under the field it is about. */
+.info > .say {
+  margin: 22px 0 4px;
+}
+
+.nothing {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 56px 20px;
+  color: var(--ink-2);
+  font-size: 16px;
+  text-align: center;
+}
+
+.nothing .icon {
+  width: 34px;
+  height: 34px;
+  opacity: 0.8;
+}
+
+/* Loading placeholders */
+.row.ghost .thumb,
+.row.ghost .line {
+  position: relative;
+  overflow: hidden;
+  background: var(--well);
+}
+
+.row.ghost .line {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+}
+
+.row.ghost .line.short {
+  width: 40%;
+}
+
+.row.ghost .line.long {
+  width: 70%;
+}
+
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'thumb info info'
+      'mover mover acts';
+    row-gap: 4px;
+    column-gap: 12px;
+    padding: 12px 10px 6px 12px;
+  }
+
+  .row-title {
+    display: -webkit-box;
+    white-space: normal;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .mover {
+    margin-left: -7px;
+  }
+
+  .row.editing .mover,
+  .row.editing .acts {
+    margin-top: 0;
+  }
+
+  .row > .say {
+    grid-column: 1 / -1;
+  }
+
+  .filter {
+    min-width: 60px;
+  }
+}

@@ -29,6 +29,11 @@ Environment variables:
 | `PORT`     | `3000`    | Port to listen on             |
 | `DATA_DIR` | `./data`  | Directory holding the JSON DB |
 
+## Admin panel
+
+`/admin` lets the teacher move, rename and delete entries; a rename survives the student sending the
+same link again. Its password is the `ADMIN_PASSWORD` constant in `server.js`, overridable by env.
+
 ## Run with Docker
 
 ```sh
