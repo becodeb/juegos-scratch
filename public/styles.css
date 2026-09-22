@@ -1,0 +1,281 @@
+:root {
+  --bg: #eef2f7;
+  --ink: #14243d;
+  --ink-soft: #5b6b83;
+  --card: #ffffff;
+  --g-4N: #4c97ff;
+  --g-4F: #9966ff;
+  --g-4S: #ffab19;
+  --accent: var(--g-4N);
+  --line: #d3dbe6;
+  --control: 58px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body[data-grade='4N'] {
+  --accent: var(--g-4N);
+}
+
+body[data-grade='4F'] {
+  --accent: var(--g-4F);
+}
+
+body[data-grade='4S'] {
+  --accent: var(--g-4S);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Nunito', 'Trebuchet MS', system-ui, sans-serif;
+  max-width: 1080px;
+  margin-inline: auto;
+  padding: clamp(20px, 5vw, 48px);
+}
+
+body:not([data-grade]) .add,
+body:not([data-grade]) .grid,
+body:not([data-grade]) .msg {
+  display: none;
+}
+
+/* Until a grade is picked, choosing one is the entire page. */
+body:not([data-grade]) {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+}
+
+body:not([data-grade]) .grades {
+  width: 100%;
+}
+
+/* All three read as available until one is chosen. */
+body[data-grade] .grade {
+  opacity: 0.38;
+}
+
+/* Grade blocks */
+.grades {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.grade {
+  position: relative;
+  border: 0;
+  border-radius: 8px;
+  padding: 18px 34px;
+  font-family: inherit;
+  font-weight: 900;
+  font-size: clamp(28px, 6vw, 44px);
+  line-height: 1;
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 120ms, transform 120ms;
+}
+
+.grade::after {
+  content: '';
+  position: absolute;
+  left: 24px;
+  bottom: -9px;
+  width: 36px;
+  height: 10px;
+  background-color: inherit;
+  border-radius: 0 0 9px 9px;
+}
+
+.grade[data-grade='4N'] {
+  background-color: var(--g-4N);
+}
+
+.grade[data-grade='4F'] {
+  background-color: var(--g-4F);
+}
+
+.grade[data-grade='4S'] {
+  background-color: var(--g-4S);
+}
+
+body[data-grade] .grade[aria-selected='true'] {
+  opacity: 1;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.18);
+}
+
+/* Add form */
+.add {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 620px;
+  margin-block: 28px 8px;
+}
+
+.add .url {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--card);
+  border: 3px solid var(--line);
+  border-radius: 999px;
+  height: var(--control);
+  padding: 0 22px;
+  font-family: inherit;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.add .url::placeholder {
+  color: var(--ink-soft);
+}
+
+.add .url:focus-visible {
+  border-color: var(--accent);
+}
+
+.add .submit {
+  flex: 0 0 var(--control);
+  width: var(--control);
+  height: var(--control);
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-family: inherit;
+  font-weight: 900;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.add .submit[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Message line */
+.msg {
+  min-height: 1.4em;
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink-soft);
+}
+
+.msg.error {
+  color: #d6332b;
+}
+
+/* Card grid */
+.grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  margin-top: 20px;
+}
+
+.empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink-soft);
+}
+
+.card {
+  display: block;
+  background: var(--card);
+  border: 3px solid var(--accent);
+  border-radius: 14px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 120ms;
+}
+
+.card img {
+  aspect-ratio: 4 / 3;
+  width: 100%;
+  object-fit: cover;
+  display: block;
+  background: #dde4ee;
+}
+
+.card .meta {
+  padding: 10px 12px 12px;
+}
+
+.card .title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card .name {
+  margin: 2px 0 0;
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card:hover,
+.card:focus-visible {
+  transform: translateY(-3px);
+}
+
+/* Focus */
+.grade:focus-visible,
+.add .url:focus-visible,
+.add .submit:focus-visible,
+.card:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 420px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
+
+  .grade[aria-selected='true'],
+  .card:hover,
+  .card:focus-visible {
+    transform: none;
+  }
+}

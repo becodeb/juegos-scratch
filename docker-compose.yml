@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: juegos-scratch
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - PORT=3000
+      - DATA_DIR=/data
+    volumes:
+      - juegos-data:/data
+
+volumes:
+  juegos-data:

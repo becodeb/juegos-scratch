@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Juegos 4°</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css?v=__V__" />
+    <script type="module" src="app.js?v=__V__"></script>
+  </head>
+  <body>
+    <nav class="grades" role="tablist" aria-label="Grados">
+      <button class="grade" type="button" role="tab" aria-selected="false" data-grade="4N">4N</button>
+      <button class="grade" type="button" role="tab" aria-selected="false" data-grade="4F">4F</button>
+      <button class="grade" type="button" role="tab" aria-selected="false" data-grade="4S">4S</button>
+    </nav>
+
+    <form class="add">
+      <input
+        class="url"
+        type="text"
+        name="url"
+        inputmode="url"
+        autocomplete="off"
+        required
+        placeholder="Pegá el link de tu juego"
+        aria-label="Link de tu juego"
+      />
+      <button class="submit" type="submit">
+        <span aria-hidden="true">+</span>
+        <span class="sr-only">Agregar</span>
+      </button>
+    </form>
+
+    <p class="msg" role="status" aria-live="polite"></p>
+
+    <main class="grid"></main>
+  </body>
+</html>
