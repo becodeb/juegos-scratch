@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -10,14 +10,22 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || './data';
-const DATA_FILE = path.join(DATA_DIR, 'games.json');
-const TMP_FILE = path.join(DATA_DIR, 'games.json.tmp');
+const GAMES_FILE = path.join(DATA_DIR, 'games.json');
+const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
 
 const GRADES = ['4N', '4F', '4S'];
 const MAX_BODY_BYTES = 4 * 1024;
 const MAX_LIST = 300;
 const MAX_TITLE = 120;
+const MAX_PROJECT_TITLE = 60;
+const MAX_SLUG = 40;
 const SCRATCH_TIMEOUT_MS = 10000;
+
+const SLUG_SHAPE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+// Top-level paths the app uses itself, so no project can take them.
+const RESERVED_SLUGS = new Set(['admin', 'api', 'fonts']);
+// Games saved before projects existed land here, unlisted.
+const LEGACY_PROJECT = { slug: 'primeros-juegos', title: 'Primeros juegos' };
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -31,6 +39,7 @@ const CONTENT_TYPES = {
 
 const ERR_BAD_LINK = 'Ese link no es de un proyecto de Scratch.';
 const ERR_NO_GRADE = 'Elegí tu grado primero.';
+const ERR_NO_PROJECT = 'Ese proyecto no existe.';
 const ERR_NOT_SHARED =
   'Ese proyecto no está compartido. Tocá «Compartir» en Scratch y probá de nuevo.';
 const ERR_UPSTREAM = 'No se pudo consultar Scratch. Probá de nuevo.';
@@ -40,8 +49,8 @@ const ERR_SAVE = 'No se pudo guardar. Probá de nuevo.';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'gatoverde';
 const ADMIN_COOKIE = '__Host-admin';
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
-const ADMIN_PAGES = new Set(['/admin', '/admin/', '/admin.html']);
-const ADMIN_GAME_PATH = /^\/api\/admin\/games\/(4[NFS])\/(\d{1,15})$/;
+const ADMIN_PAGE_PATH = /^\/admin(?:\.html|\/(?:[^/.]+\/?)?)?$/;
+const ADMIN_PROJECT_PATH = /^\/api\/admin\/projects\/([\w-]{1,64})(?:\/games(?:\/(4[NFS])\/(\d{1,15}))?)?$/;
 // Both derive from the password, so changing it signs every session out.
 const PASSWORD_DIGEST = createHash('sha256').update(ADMIN_PASSWORD).digest();
 const SESSION_KEY = createHash('sha256').update(`juegos-scratch admin session:${ADMIN_PASSWORD}`).digest();
@@ -49,12 +58,18 @@ const SESSION_KEY = createHash('sha256').update(`juegos-scratch admin session:${
 const ERR_ADMIN_PASSWORD = 'Contraseña incorrecta.';
 const ERR_ADMIN_SESSION = 'Entrá de nuevo.';
 const ERR_ADMIN_GONE = 'Ese juego ya no está.';
+const ERR_ADMIN_PROJECT_GONE = 'Ese proyecto ya no está.';
 const ERR_ADMIN_GRADE = 'Ese grado no existe.';
 const ERR_ADMIN_NOTHING = 'No hay cambios.';
 const ERR_ADMIN_BAD = 'No se entendió el pedido.';
+const ERR_SLUG_SHAPE = 'La dirección solo puede tener letras sin tildes, números y guiones.';
+const ERR_SLUG_EMPTY = 'Elegí una dirección con letras o números.';
+const ERR_SLUG_RESERVED = 'Esa dirección está reservada. Elegí otra.';
+const ERR_SLUG_TAKEN = 'Ya hay un proyecto con esa dirección.';
 
 /** In-memory source of truth. */
 let games = [];
+let projects = [];
 
 /** Serializes persistence so concurrent requests never interleave writes. */
 let writeChain = Promise.resolve();
@@ -105,34 +120,128 @@ function extractProjectId(input) {
   return url ? url[1] : null;
 }
 
-async function loadGames() {
-  await mkdir(DATA_DIR, { recursive: true });
-  try {
-    const text = await readFile(DATA_FILE, 'utf8');
-    const parsed = JSON.parse(text);
-    games = Array.isArray(parsed) ? parsed : [];
-  } catch {
-    games = [];
-    await writeFile(DATA_FILE, '[]', 'utf8');
-  }
+/** "Juegos de Ñandú" becomes `juegos-de-nandu`; a long title is cut at a word, within 40 characters. */
+function slugify(text) {
+  const full = String(text ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (full.length <= MAX_SLUG) return full;
+  const cut = full.slice(0, MAX_SLUG + 1);
+  const end = cut.lastIndexOf('-');
+  return (end > 0 ? cut.slice(0, end) : full.slice(0, MAX_SLUG)).replace(/-+$/, '');
 }
 
-function persist() {
+function newProjectId() {
+  let id;
+  do id = randomBytes(6).toString('hex');
+  while (projects.some((project) => project.id === id));
+  return id;
+}
+
+function createProject(title, slug, listed) {
+  const project = { id: newProjectId(), slug, title, listed, createdAt: new Date().toISOString() };
+  projects.push(project);
+  return project;
+}
+
+/** The first free `base`, `base-2`, `base-3`… Only migration uses it; people get a 409 instead. */
+function freeSlug(base) {
+  let slug = base;
+  for (let n = 2; projects.some((project) => project.slug === slug); n++) slug = `${base}-${n}`;
+  return slug;
+}
+
+/**
+ * Gives every game a project without touching anything else in it. Games from before
+ * projects existed join one unlisted project; a game whose project vanished gets a
+ * placeholder project with the same id, so nothing becomes invisible.
+ */
+function migrate() {
+  let changed = false;
+  const loose = games.filter((game) => typeof game.project !== 'string' || !game.project);
+  if (loose.length) {
+    const legacy =
+      projects.find((project) => project.slug === LEGACY_PROJECT.slug) ??
+      createProject(LEGACY_PROJECT.title, LEGACY_PROJECT.slug, false);
+    for (const game of loose) game.project = legacy.id;
+    changed = true;
+  }
+  const known = new Set(projects.map((project) => project.id));
+  for (const game of games) {
+    if (known.has(game.project)) continue;
+    projects.push({
+      id: game.project,
+      slug: freeSlug('recuperado'),
+      title: 'Proyecto recuperado',
+      listed: false,
+      createdAt: new Date().toISOString(),
+    });
+    known.add(game.project);
+    changed = true;
+  }
+  return changed;
+}
+
+/** Reads a JSON array. A file that exists but cannot be read is kept aside, never overwritten. */
+async function readList(file) {
+  let text;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    /* set aside below */
+  }
+  await rename(file, `${file}.broken-${Date.now()}`);
+  return null;
+}
+
+async function loadData() {
+  await mkdir(DATA_DIR, { recursive: true });
+  const savedGames = await readList(GAMES_FILE);
+  const savedProjects = await readList(PROJECTS_FILE);
+  games = savedGames ?? [];
+  projects = savedProjects ?? [];
+  if (migrate() || !savedGames || !savedProjects) await persist();
+}
+
+async function writeAtomic(file, list) {
+  const tmp = `${file}.tmp`;
+  await writeFile(tmp, JSON.stringify(list), 'utf8');
+  await rename(tmp, file);
+}
+
+/**
+ * Writes both files. Projects go first, so a crash in between never leaves a game
+ * pointing at a project that was not saved; a deletion passes `gamesFirst` so the
+ * games of a deleted project cannot outlive it on disk.
+ */
+function persist({ gamesFirst = false } = {}) {
   const run = async () => {
-    await writeFile(TMP_FILE, JSON.stringify(games), 'utf8');
-    await rename(TMP_FILE, DATA_FILE);
+    if (gamesFirst) await writeAtomic(GAMES_FILE, games);
+    await writeAtomic(PROJECTS_FILE, projects);
+    if (!gamesFirst) await writeAtomic(GAMES_FILE, games);
   };
   const next = writeChain.then(run, run);
   writeChain = next.catch(() => {});
   return next;
 }
 
-function sendJson(res, status, payload) {
+function sendJson(res, status, payload, headers = {}) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
     'Cache-Control': 'no-store',
+    ...headers,
   });
   res.end(body);
 }
@@ -184,19 +293,38 @@ function readBody(req) {
   });
 }
 
-/** The fields every API answer exposes; bookkeeping flags stay on the server. */
+/** The fields every public answer exposes; bookkeeping stays on the server. */
 function publicGame({ id, title, author, name, grade, addedAt }) {
   return { id, title, author, name, grade, addedAt };
 }
 
 const newestFirst = (a, b) => String(b.addedAt).localeCompare(String(a.addedAt));
+const newestProjectFirst = (a, b) => String(b.createdAt).localeCompare(String(a.createdAt));
 
-function listGames(grade) {
-  return games
+const projectBySlug = (slug) => projects.find((project) => project.slug === slug);
+const projectById = (id) => projects.find((project) => project.id === id);
+const gamesOf = (project) => games.filter((game) => game.project === project.id).sort(newestFirst);
+
+/** Ids of the newest games, one per Scratch project, for a cover mosaic. */
+function coverIds(list) {
+  return [...new Set(list.map((game) => game.id))].slice(0, 4);
+}
+
+function listGames(project, grade) {
+  return gamesOf(project)
     .filter((game) => game.grade === grade)
-    .sort(newestFirst)
     .slice(0, MAX_LIST)
     .map(publicGame);
+}
+
+function listProjects() {
+  return projects
+    .filter((project) => project.listed)
+    .sort(newestProjectFirst)
+    .map((project) => {
+      const own = gamesOf(project);
+      return { slug: project.slug, title: project.title, count: own.length, recent: coverIds(own) };
+    });
 }
 
 async function fetchProject(id) {
@@ -256,15 +384,20 @@ async function handleCreate(req, res) {
   const grade = typeof body?.grade === 'string' ? body.grade : '';
   if (!GRADES.includes(grade)) return sendJson(res, 400, { error: ERR_NO_GRADE });
 
+  const owner = typeof body?.project === 'string' ? projectBySlug(body.project) : undefined;
+  if (!owner) return sendJson(res, 404, { error: ERR_NO_PROJECT });
+
   const project = await fetchProject(id);
   if (!project.ok) {
     return sendJson(res, project.status, {
       error: project.status === 502 ? ERR_UPSTREAM : ERR_NOT_SHARED,
     });
   }
+  // The project may have been deleted while Scratch answered.
+  if (!projectById(owner.id)) return sendJson(res, 404, { error: ERR_NO_PROJECT });
 
   const title = (project.title || 'Sin título').slice(0, MAX_TITLE);
-  const existing = games.find((game) => game.id === id && game.grade === grade);
+  const existing = games.find((game) => game.project === owner.id && game.grade === grade && game.id === id);
 
   let game;
   let status;
@@ -283,6 +416,7 @@ async function handleCreate(req, res) {
       name: prettify(project.author),
       grade,
       addedAt: new Date().toISOString(),
+      project: owner.id,
     };
     games.push(game);
     status = 201;
@@ -295,6 +429,26 @@ async function handleCreate(req, res) {
   }
 
   return sendJson(res, status, { game: publicGame(game) });
+}
+
+function handlePublicApi(req, res, url) {
+  const { pathname, searchParams } = url;
+  if (pathname === '/api/games') {
+    const grade = searchParams.get('grade') || '';
+    if (!GRADES.includes(grade)) return sendJson(res, 400, { error: ERR_NO_GRADE });
+    const project = projectBySlug(searchParams.get('project') || '');
+    if (!project) return sendJson(res, 404, { error: ERR_NO_PROJECT });
+    return sendJson(res, 200, { games: listGames(project, grade) });
+  }
+  if (pathname === '/api/projects') return sendJson(res, 200, { projects: listProjects() });
+  const match = /^\/api\/projects\/([^/]+)$/.exec(pathname);
+  const project = match && projectBySlug(match[1]);
+  if (project) {
+    const { slug, title, listed } = project;
+    return sendJson(res, 200, { project: { slug, title, listed } }, listed ? {} : { 'X-Robots-Tag': 'noindex' });
+  }
+  if (match) return sendJson(res, 404, { error: ERR_NO_PROJECT });
+  return sendJson(res, 404, { error: 'Not found' });
 }
 
 /* ---------- Admin ---------- */
@@ -352,14 +506,105 @@ async function handleLogin(req, res) {
   return sendJson(res, 200, { ok: true });
 }
 
-function countByGrade() {
+function countByGrade(list) {
   const counts = Object.fromEntries(GRADES.map((grade) => [grade, 0]));
-  for (const game of games) if (game.grade in counts) counts[game.grade] += 1;
+  for (const game of list) if (game.grade in counts) counts[game.grade] += 1;
   return counts;
 }
 
+function adminProject(project) {
+  const own = gamesOf(project);
+  const { id, slug, title, listed, createdAt } = project;
+  return { id, slug, title, listed, createdAt, counts: countByGrade(own), total: own.length, recent: coverIds(own) };
+}
+
+/** Checks a slug a person typed. Returns an error message, or null when it can be used. */
+function slugProblem(slug) {
+  if (!slug) return ERR_SLUG_EMPTY;
+  if (slug.length > MAX_SLUG) return `La dirección puede tener hasta ${MAX_SLUG} caracteres.`;
+  if (!SLUG_SHAPE.test(slug)) return ERR_SLUG_SHAPE;
+  if (RESERVED_SLUGS.has(slug)) return ERR_SLUG_RESERVED;
+  return null;
+}
+
+const slugTaken = (slug, self) => projects.some((project) => project.slug === slug && project !== self);
+
+/** Validates project fields. Returns `{ changes }`, or `{ status, error }`. */
+function readProjectChanges(body, self) {
+  const changes = {};
+  if (body.title !== undefined) {
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    if (!title) return { status: 400, error: 'El nombre no puede quedar vacío.' };
+    if (title.length > MAX_PROJECT_TITLE) {
+      return { status: 400, error: `El nombre puede tener hasta ${MAX_PROJECT_TITLE} caracteres.` };
+    }
+    changes.title = title;
+  }
+  if (body.slug !== undefined) {
+    const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
+    const problem = slugProblem(slug);
+    if (problem) return { status: 400, error: problem };
+    if (slugTaken(slug, self)) return { status: 409, error: ERR_SLUG_TAKEN };
+    changes.slug = slug;
+  }
+  if (body.listed !== undefined) {
+    if (typeof body.listed !== 'boolean') return { status: 400, error: ERR_ADMIN_BAD };
+    changes.listed = body.listed;
+  }
+  return { changes };
+}
+
+async function handleProjectCreate(req, res) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  if (body.title === undefined) return sendJson(res, 400, { error: 'El nombre no puede quedar vacío.' });
+  // Without a slug, the title suggests one; a taken or odd one is still a clear error.
+  const fields = { ...body, slug: body.slug === undefined ? slugify(body.title) : body.slug };
+  const { changes, status, error } = readProjectChanges(fields, null);
+  if (error) return sendJson(res, status, { error });
+
+  // New projects start off the home page until the teacher lists them.
+  const project = createProject(changes.title, changes.slug, changes.listed ?? false);
+  try {
+    await persist();
+  } catch {
+    return sendJson(res, 500, { error: ERR_SAVE });
+  }
+  return sendJson(res, 201, { project: adminProject(project) });
+}
+
+async function handleProjectUpdate(req, res, project) {
+  const body = await readJsonBody(req, res);
+  if (!body) return;
+  const { changes, status, error } = readProjectChanges(body, project);
+  if (error) return sendJson(res, status, { error });
+  if (Object.keys(changes).length === 0) return sendJson(res, 400, { error: ERR_ADMIN_NOTHING });
+
+  // Games point at the project id, so a new slug leaves them untouched.
+  Object.assign(project, changes);
+  try {
+    await persist();
+  } catch {
+    return sendJson(res, 500, { error: ERR_SAVE });
+  }
+  return sendJson(res, 200, { project: adminProject(project) });
+}
+
+async function handleProjectDelete(req, res, project) {
+  req.resume();
+  const before = games.length;
+  games = games.filter((game) => game.project !== project.id);
+  projects = projects.filter((entry) => entry !== project);
+  try {
+    await persist({ gamesFirst: true });
+  } catch {
+    return sendJson(res, 500, { error: ERR_SAVE });
+  }
+  return sendJson(res, 200, { ok: true, games: before - games.length });
+}
+
 /** Validates `{ grade?, title?, name? }`. Returns `{ changes }` or `{ error }`. */
-function readChanges(body) {
+function readGameChanges(body) {
   const changes = {};
   if (body.grade !== undefined) {
     if (!GRADES.includes(body.grade)) return { error: ERR_ADMIN_GRADE };
@@ -379,17 +624,20 @@ function readChanges(body) {
   return { changes };
 }
 
-async function handleUpdate(req, res, grade, id) {
+const findGame = (project, grade, id) =>
+  games.find((entry) => entry.project === project.id && entry.grade === grade && entry.id === id);
+
+async function handleGameUpdate(req, res, project, grade, id) {
   const body = await readJsonBody(req, res);
   if (!body) return;
-  const { changes, error } = readChanges(body);
+  const { changes, error } = readGameChanges(body);
   if (error) return sendJson(res, 400, { error });
 
-  const game = games.find((entry) => entry.id === id && entry.grade === grade);
+  const game = findGame(project, grade, id);
   if (!game) return sendJson(res, 404, { error: ERR_ADMIN_GONE });
 
   const target = changes.grade ?? grade;
-  if (target !== grade && games.some((entry) => entry.id === id && entry.grade === target)) {
+  if (target !== grade && findGame(project, target, id)) {
     return sendJson(res, 409, { error: `Ese juego ya está en ${target}.` });
   }
 
@@ -411,11 +659,11 @@ async function handleUpdate(req, res, grade, id) {
   return sendJson(res, 200, { game: publicGame(game) });
 }
 
-async function handleDelete(req, res, grade, id) {
+async function handleGameDelete(req, res, project, grade, id) {
   req.resume();
-  const index = games.findIndex((entry) => entry.id === id && entry.grade === grade);
-  if (index === -1) return sendJson(res, 404, { error: ERR_ADMIN_GONE });
-  games.splice(index, 1);
+  const game = findGame(project, grade, id);
+  if (!game) return sendJson(res, 404, { error: ERR_ADMIN_GONE });
+  games = games.filter((entry) => entry !== game);
 
   try {
     await persist();
@@ -439,31 +687,79 @@ async function handleAdmin(req, res, pathname) {
     return sendJson(res, 401, { error: ERR_ADMIN_SESSION });
   }
 
-  if (pathname === '/api/admin/games') {
+  if (pathname === '/api/admin/projects') {
+    if (req.method === 'POST') return handleProjectCreate(req, res);
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: ERR_ADMIN_BAD });
-    return sendJson(res, 200, {
-      games: [...games].sort(newestFirst).map(publicGame),
-      counts: countByGrade(),
-    });
+    return sendJson(res, 200, { projects: [...projects].sort(newestProjectFirst).map(adminProject) });
   }
 
-  const match = ADMIN_GAME_PATH.exec(pathname);
+  const match = ADMIN_PROJECT_PATH.exec(pathname);
   if (!match) return sendJson(res, 404, { error: 'Not found' });
-  const [, grade, id] = match;
-  if (req.method === 'PATCH') return handleUpdate(req, res, grade, id);
-  if (req.method === 'DELETE') return handleDelete(req, res, grade, id);
+  const [, projectId, grade, id] = match;
+  const project = projectById(projectId);
+  if (!project) {
+    req.resume();
+    return sendJson(res, 404, { error: ERR_ADMIN_PROJECT_GONE });
+  }
+  const scope = pathname.endsWith('/games') ? 'games' : grade ? 'game' : 'project';
+
+  if (scope === 'project') {
+    if (req.method === 'PATCH') return handleProjectUpdate(req, res, project);
+    if (req.method === 'DELETE') return handleProjectDelete(req, res, project);
+  } else if (scope === 'games') {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const own = gamesOf(project);
+      return sendJson(res, 200, {
+        project: adminProject(project),
+        games: own.map(publicGame),
+        counts: countByGrade(own),
+      });
+    }
+  } else {
+    if (req.method === 'PATCH') return handleGameUpdate(req, res, project, grade, id);
+    if (req.method === 'DELETE') return handleGameDelete(req, res, project, grade, id);
+  }
+  req.resume();
   return sendJson(res, 405, { error: ERR_ADMIN_BAD });
 }
 
-async function handleAdminPage(res) {
-  const data = await readFile(path.join(PUBLIC_DIR, 'admin.html'));
-  res.writeHead(200, {
+/* ---------- Pages ---------- */
+
+async function sendPage(res, file, status, headers = {}) {
+  const data = await readFile(path.join(PUBLIC_DIR, file));
+  res.writeHead(status, {
     'Content-Type': CONTENT_TYPES['.html'],
     'Content-Length': data.length,
-    'Cache-Control': 'no-store',
-    'X-Robots-Tag': 'noindex',
+    'Cache-Control': 'no-cache',
+    ...headers,
   });
   res.end(data);
+}
+
+/**
+ * `/` is the projects home and `/<slug>` a project; index.html reads the path.
+ * `/Pong` and `/pong/` redirect to `/pong`; unknown paths get the app's own 404.
+ */
+function handleAppPage(res, url) {
+  const { pathname, search } = url;
+  if (pathname === '/' || pathname === '/index.html') return sendPage(res, 'index.html', 200);
+
+  const segment = /^\/([^/]+)\/?$/.exec(pathname)?.[1];
+  let slug = '';
+  try {
+    slug = segment ? decodeURIComponent(segment).toLowerCase() : '';
+  } catch {
+    slug = '';
+  }
+  if (SLUG_SHAPE.test(slug) && pathname !== `/${slug}`) {
+    res.writeHead(301, { Location: `/${slug}${search}`, 'Content-Length': 0 });
+    res.end();
+    return undefined;
+  }
+
+  const project = SLUG_SHAPE.test(slug) && !RESERVED_SLUGS.has(slug) ? projectBySlug(slug) : undefined;
+  if (!project) return sendPage(res, 'index.html', 404, { 'X-Robots-Tag': 'noindex' });
+  return sendPage(res, 'index.html', 200, project.listed ? {} : { 'X-Robots-Tag': 'noindex' });
 }
 
 function resolveStaticPath(pathname) {
@@ -474,8 +770,7 @@ function resolveStaticPath(pathname) {
     return null;
   }
 
-  const relative = decoded === '/' ? '/index.html' : decoded;
-  const resolved = path.resolve(PUBLIC_DIR, `.${path.posix.normalize(relative)}`);
+  const resolved = path.resolve(PUBLIC_DIR, `.${path.posix.normalize(decoded)}`);
   if (resolved !== PUBLIC_DIR && !resolved.startsWith(PUBLIC_DIR + path.sep)) return null;
   return resolved;
 }
@@ -507,6 +802,7 @@ async function handleStatic(res, pathname) {
 const server = createServer((req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const { pathname } = url;
+  const reading = req.method === 'GET' || req.method === 'HEAD';
 
   if (pathname.startsWith('/api/admin/')) {
     handleAdmin(req, res, pathname).catch(() => {
@@ -515,33 +811,39 @@ const server = createServer((req, res) => {
     return;
   }
 
-  if ((req.method === 'GET' || req.method === 'HEAD') && ADMIN_PAGES.has(pathname)) {
-    handleAdminPage(res).catch(() => sendPlain(res, 404, 'Not found'));
-    return;
-  }
-
   if (req.method === 'POST' && pathname === '/api/games') {
     handleCreate(req, res).catch(() => sendJson(res, 500, { error: ERR_SAVE }));
     return;
   }
 
-  if (req.method === 'GET' || req.method === 'HEAD') {
-    if (pathname === '/api/games') {
-      const grade = url.searchParams.get('grade') || '';
-      if (!GRADES.includes(grade)) return sendJson(res, 400, { error: ERR_NO_GRADE });
-      return sendJson(res, 200, { games: listGames(grade) });
-    }
-    if (pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'Not found' });
-    handleStatic(res, pathname).catch(() => sendPlain(res, 404, 'Not found'));
+  if (!reading) {
+    sendPlain(res, 405, 'Method not allowed');
     return;
   }
 
-  sendPlain(res, 405, 'Method not allowed');
+  if (pathname.startsWith('/api/')) {
+    handlePublicApi(req, res, url);
+    return;
+  }
+
+  if (ADMIN_PAGE_PATH.test(pathname)) {
+    sendPage(res, 'admin.html', 200, { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).catch(() =>
+      sendPlain(res, 404, 'Not found'),
+    );
+    return;
+  }
+
+  // Files have an extension in their last segment; everything else is the app.
+  if (/\.[^/]+$/.test(pathname) && pathname !== '/index.html') {
+    handleStatic(res, pathname).catch(() => sendPlain(res, 404, 'Not found'));
+    return;
+  }
+  Promise.resolve(handleAppPage(res, url)).catch(() => sendPlain(res, 404, 'Not found'));
 });
 
-await loadGames();
+await loadData();
 server.listen(PORT, HOST, () => {
   console.log(`juegos-scratch listening on http://${HOST}:${PORT}`);
 });
 
-export { prettify, extractProjectId };
+export { prettify, extractProjectId, slugify };

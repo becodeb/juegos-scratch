@@ -270,6 +270,7 @@ button {
 
 /* Landing: three giant hat blocks dropped on the canvas. */
 .landing {
+  position: relative;
   --s: 3.2;
   min-height: 100dvh;
   display: grid;
@@ -621,13 +622,14 @@ button {
   margin-top: clamp(36px, 4vw, 52px);
 }
 
+/* Big stages: three across a desktop board, two on a tablet, one on a phone. */
 .grid {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 44px 28px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 52px 36px;
   transition: opacity 160ms ease;
 }
 
@@ -706,7 +708,7 @@ button {
   z-index: 2;
   display: grid;
   place-items: center;
-  width: clamp(48px, 30%, 64px);
+  width: clamp(56px, 22%, 76px);
   aspect-ratio: 1;
   border-radius: 50%;
   background: #fff;
@@ -767,8 +769,8 @@ button {
 
 .title {
   display: -webkit-box;
-  margin: 14px 2px 0;
-  font-size: 17px;
+  margin: 16px 2px 0;
+  font-size: 21px;
   font-weight: 700;
   line-height: 1.25;
   color: var(--ink);
@@ -781,8 +783,8 @@ button {
 
 .name {
   display: block;
-  margin: 3px 2px 0;
-  font-size: 15px;
+  margin: 4px 2px 0;
+  font-size: 16px;
   font-weight: 400;
   line-height: 1.35;
   color: var(--ink-2);
@@ -864,6 +866,211 @@ button {
   }
   to {
     translate: 0 -10%;
+  }
+}
+
+/* ---------- Project name, small and quiet: the grade stays the headline ---------- */
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 44px;
+  margin: 0;
+  view-transition-name: crumb;
+}
+
+.crumb .back {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin-left: -10px;
+  border-radius: 50%;
+  color: var(--ink-2);
+}
+
+.crumb .back .icon {
+  width: 22px;
+  height: 22px;
+}
+
+@media (hover: hover) {
+  .crumb .back:hover {
+    background: var(--well);
+    color: var(--ink);
+  }
+}
+
+.crumb-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ink-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.landing > .crumb {
+  position: absolute;
+  top: clamp(14px, 3vw, 28px);
+  left: clamp(18px, 3vw, 36px);
+  right: clamp(18px, 3vw, 36px);
+}
+
+.board > .crumb {
+  margin-bottom: 6px;
+}
+
+/* ---------- Home: every listed project as a big mosaic of its newest games ---------- */
+
+.home {
+  max-width: 1296px;
+  margin-inline: auto;
+  padding: clamp(40px, 6vw, 84px) clamp(16px, 4vw, 48px) 120px;
+}
+
+/* Fewer, bigger cards than the game grid: two across a desktop, one on phones and small tablets. */
+.projects {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+  gap: 64px 44px;
+}
+
+.project .title {
+  margin-top: 18px;
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+/* Tiles live in an inner box, so rounding them never clips the drag shadow. */
+.tiles {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 3px;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--paper);
+}
+
+.tiles img {
+  min-width: 0;
+  min-height: 0;
+  border-radius: 0;
+}
+
+.tiles[data-n='1'] {
+  grid-template: 1fr / 1fr;
+}
+
+.tiles[data-n='2'] {
+  grid-template: 1fr / 1fr 1fr;
+}
+
+.tiles[data-n='3'],
+.tiles[data-n='4'] {
+  grid-template: 1fr 1fr / 1fr 1fr;
+}
+
+.tiles[data-n='3'] img:first-child {
+  grid-row: span 2;
+}
+
+.mosaic.none {
+  display: grid;
+  place-items: center;
+}
+
+.mosaic.none .icon {
+  width: 26%;
+  height: 26%;
+  color: var(--ink-2);
+  opacity: 0.5;
+}
+
+.home-empty {
+  display: grid;
+  gap: 16px;
+  max-width: 380px;
+}
+
+.home-empty .frame {
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 3px dashed var(--mark);
+}
+
+.home-empty .frame::before,
+.home-empty .frame::after {
+  content: none;
+}
+
+.home-empty .icon {
+  width: 26%;
+  height: 26%;
+  color: var(--mark);
+}
+
+.home-empty-text {
+  margin: 0 2px;
+  font-size: 19px;
+  color: var(--ink-2);
+}
+
+/* ---------- A project that does not exist ---------- */
+
+.missing {
+  --s: 2;
+  --cap: calc(17px * var(--s));
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 420px);
+  place-content: center;
+  padding: 40px 22px 12vh;
+}
+
+.lost {
+  justify-self: start;
+  min-height: calc(56px * var(--s));
+  margin-top: var(--cap);
+  padding-top: 0;
+  font-size: calc(44px * var(--s));
+}
+
+.note {
+  margin-top: 30px;
+}
+
+.home-link {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  margin-top: 28px;
+  padding: 0 22px 0 18px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 17px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.home-link .icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* Moving between the home and a project crossfades instead of flashing. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition {
+    navigation: auto;
   }
 }
 
@@ -957,8 +1164,9 @@ button {
 
 /* Phone */
 @media (max-width: 599px) {
+  /* Room above the first hat for the project name. */
   .landing {
-    padding: 32px 22px 48px;
+    padding: 76px 22px 48px;
   }
   .hats {
     row-gap: calc(14px * var(--s));
@@ -994,15 +1202,23 @@ button {
     font-size: 16px;
   }
   .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 30px 14px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
   }
   .title {
-    margin-top: 10px;
-    font-size: 15px;
+    margin-top: 12px;
+    font-size: 19px;
   }
   .name {
-    font-size: 13.5px;
+    font-size: 15px;
+  }
+  /* The project name and the grade palette share the first row. */
+  .board > .crumb {
+    max-width: calc(100% - 200px);
+    margin: 4px 0 0;
+  }
+  .board > .crumb + .top {
+    margin-top: -48px;
   }
 }
 

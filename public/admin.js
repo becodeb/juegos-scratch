@@ -5,10 +5,15 @@ const SETTLE = 'cubic-bezier(.2, .7, .4, 1)';
 const CONFIRM_MS = 3000;
 const SKELETON_DELAY = 150;
 const MAX_TEXT = 120;
+const MAX_PROJECT_TITLE = 60;
+const MAX_SLUG = 40;
+// Mirrors the server, which stays authoritative.
+const SLUG_SHAPE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+const RESERVED_SLUGS = new Set(['admin', 'api', 'fonts']);
 
 const ERR_OFFLINE = 'No hay conexión. Probá de nuevo.';
 const ERR_SAVE = 'No se pudo guardar. Probá de nuevo.';
-const ERR_LOAD = 'No se pudieron cargar los juegos. Recargá la página.';
+const ERR_LOAD = 'No se pudo cargar. Recargá la página.';
 const ERR_EXPIRED = 'Tu sesión se cerró. Entrá de nuevo.';
 
 const gate = document.querySelector('.gate');
@@ -16,14 +21,25 @@ const loginForm = gate.querySelector('.login');
 const password = loginForm.querySelector('.slot');
 const enterButton = loginForm.querySelector('.enter');
 const panel = document.querySelector('.panel');
+const upLink = panel.querySelector('.up');
 const head = panel.querySelector('.head');
+const headLabel = head.querySelector('.head-label');
 const outButton = panel.querySelector('.out');
-const filtersBox = panel.querySelector('.filters');
+
+const projectsView = panel.querySelector('.projects-view');
+const maker = projectsView.querySelector('.maker');
+const makerTitle = maker.querySelector('.maker-title');
+const makerSlug = maker.querySelector('.maker-slug');
+const plist = projectsView.querySelector('.plist');
+const pnothing = projectsView.querySelector('.nothing');
+
+const gamesView = panel.querySelector('.games-view');
+const filtersBox = gamesView.querySelector('.filters');
 const filterButtons = [...filtersBox.querySelectorAll('.filter')];
-const sheet = panel.querySelector('.sheet');
-const rows = sheet.querySelector('.rows');
-const nothing = sheet.querySelector('.nothing');
+const rows = gamesView.querySelector('.glist');
+const nothing = gamesView.querySelector('.nothing');
 const nothingText = nothing.querySelector('.nothing-text');
+
 const bubble = document.querySelector('.say');
 const bubbleText = bubble.querySelector('.say-text');
 const live = document.getElementById('live');
@@ -32,7 +48,10 @@ const motionOk = matchMedia('(prefers-reduced-motion: no-preference)');
 const moving = () => motionOk.matches;
 const shortDate = new Intl.DateTimeFormat('es-AR', { dateStyle: 'short' });
 
-/** Every game, newest first, exactly as the server last confirmed it. */
+/** Every project, newest first, as the server last confirmed it. */
+let projects = [];
+/** The project whose games are open, and those games, newest first. */
+let current = null;
 let games = [];
 let filter = 'all';
 
@@ -67,27 +86,27 @@ function bubblePath(w, h, tx, k = 1.5) {
 }
 
 /** Left edge in layout pixels; offsets ignore transforms, so a pop or a glide cannot skew it. */
-function layoutLeft(el) {
+function layoutLeft(node) {
   let x = 0;
-  for (let node = el; node; node = node.offsetParent) x += node.offsetLeft;
+  for (let at = node; at; at = at.offsetParent) x += at.offsetLeft;
   return x;
 }
 
 let tailTarget = null;
 
-function draw(el, w, h) {
+function draw(node, w, h) {
   if (!w || !h) return;
   let d;
-  if (el === bubble) {
+  if (node === bubble) {
     const aim = tailTarget ? layoutLeft(tailTarget) + Math.min(tailTarget.offsetWidth / 2, 20) : 0;
     const tip = Math.min(Math.max(aim - layoutLeft(bubble), 24), w - 48);
     d = bubblePath(w, h, tip + 6);
     bubble.style.transformOrigin = `${tip}px -18px`;
   } else {
-    const s = parseFloat(getComputedStyle(el).getPropertyValue('--s')) || 1;
-    d = blockPath(w, h, s, { hat: el.classList.contains('hat'), notch: el.classList.contains('cmd') });
+    const s = parseFloat(getComputedStyle(node).getPropertyValue('--s')) || 1;
+    d = blockPath(w, h, s, { hat: node.classList.contains('hat'), notch: node.classList.contains('cmd') });
   }
-  el.querySelector(':scope > .shape .body').setAttribute('d', d);
+  node.querySelector(':scope > .shape .body').setAttribute('d', d);
 }
 
 const shapes = new ResizeObserver((entries) => {
@@ -97,15 +116,15 @@ const shapes = new ResizeObserver((entries) => {
   }
 });
 
-function addShape(el) {
+function addShape(node) {
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('class', 'shape');
   svg.setAttribute('aria-hidden', 'true');
   const path = document.createElementNS(NS, 'path');
   path.setAttribute('class', 'body');
   svg.append(path);
-  el.prepend(svg);
-  shapes.observe(el);
+  node.prepend(svg);
+  shapes.observe(node);
 }
 
 /* ---------- Small helpers ---------- */
@@ -153,8 +172,54 @@ async function api(method, url, body) {
   return { status: response.status, data };
 }
 
-const gamePath = (game) => `/api/admin/games/${game.grade}/${game.id}`;
+const projectPath = (project) => `/api/admin/projects/${project.id}`;
+const gamePath = (game) => `${projectPath(current)}/games/${game.grade}/${game.id}`;
 const thumbUrl = (id) => `https://cdn2.scratch.mit.edu/get_image/project/${id}_144x108.png`;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/** Same rule as the server: accents stripped, anything else a hyphen, cut at a word within 40. */
+function slugify(text) {
+  const full = String(text ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (full.length <= MAX_SLUG) return full;
+  const cut = full.slice(0, MAX_SLUG + 1);
+  const end = cut.lastIndexOf('-');
+  return (end > 0 ? cut.slice(0, end) : full.slice(0, MAX_SLUG)).replace(/-+$/, '');
+}
+
+/** What is wrong with a slug for `self` (null when creating), or null when it can be used. */
+function slugProblem(slug, self) {
+  if (!slug) return 'Elegí una dirección con letras o números.';
+  if (slug.length > MAX_SLUG) return `La dirección puede tener hasta ${MAX_SLUG} caracteres.`;
+  if (!SLUG_SHAPE.test(slug)) return 'La dirección solo puede tener letras sin tildes, números y guiones.';
+  if (RESERVED_SLUGS.has(slug)) return 'Esa dirección está reservada. Elegí otra.';
+  if (projects.some((project) => project.slug === slug && project !== self)) {
+    return 'Ya hay un proyecto con esa dirección.';
+  }
+  return null;
+}
+
+/** Keeps a slug field typeable: lowercase, no accents, anything else becomes a hyphen. */
+function tidySlugField(input) {
+  const before = input.value;
+  const tidy = before
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-{2,}/g, '-');
+  if (tidy === before) return;
+  const caret = input.selectionStart ?? tidy.length;
+  input.value = tidy;
+  const at = Math.min(caret - (before.length - tidy.length), tidy.length);
+  input.setSelectionRange(Math.max(at, 0), Math.max(at, 0));
+}
+
+const finalSlug = (value) => value.trim().replace(/^-+|-+$/g, '');
 
 /* ---------- Motion ---------- */
 
@@ -177,10 +242,12 @@ const onScreen = (node) => {
   return rect.bottom > -80 && rect.top < innerHeight + 80;
 };
 
+const listOf = (node) => node.closest('.rows');
+
 /** Applies a change that moves rows, then glides each visible row from where it was (FLIP). */
-function flip(change) {
-  if (!moving()) return change();
-  const tracked = [...rows.children].filter(onScreen);
+function flip(list, change) {
+  if (!moving() || !list) return change();
+  const tracked = [...list.children].filter(onScreen);
   const before = tracked.map((row) => row.getBoundingClientRect().top);
   for (const row of tracked) row.glide?.cancel();
   const result = change();
@@ -201,17 +268,35 @@ function flash(row) {
   row.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 1200, easing: 'ease-in', pseudoElement: '::after' });
 }
 
+function rise(items) {
+  if (!moving()) return;
+  items.slice(0, 12).forEach((row, i) => {
+    row.animate(
+      [
+        { opacity: 0, transform: 'translateY(8px)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      { duration: 240, delay: i * 18, easing: SETTLE, fill: 'backwards' },
+    );
+  });
+}
+
 /* ---------- Say bubble ---------- */
 
-/** Shows `message` under `place` (inside it when it is a row) with the tail aimed at `target`. */
-function say(message, place, target) {
+/**
+ * Shows `message` under `place` (inside it when it is a row) with the tail aimed at `target`.
+ * `info` swaps the stop sign for a calm note, for news that is not an error.
+ */
+function say(message, place, target, { info = false } = {}) {
   const inRow = place.classList.contains('row');
+  const list = listOf(place);
   const change = () => {
     if (inRow) place.append(bubble);
     else place.after(bubble);
     bubbleText.textContent = message;
     tailTarget = target;
     bubble.hidden = false;
+    bubble.classList.toggle('calm', info);
     bubble.classList.remove('end');
     if (inRow) {
       const rowBox = place.getBoundingClientRect();
@@ -219,7 +304,7 @@ function say(message, place, target) {
       if (aim.left + aim.width / 2 - rowBox.left > rowBox.width * 0.55) bubble.classList.add('end');
     }
   };
-  flip(change);
+  flip(list, change);
   draw(bubble, bubble.offsetWidth, bubble.offsetHeight);
   announce(message);
   if (moving()) bubble.animate(POP, { duration: 300, easing: SPRING });
@@ -227,19 +312,112 @@ function say(message, place, target) {
 
 function unsay() {
   if (bubble.hidden) return;
-  flip(() => {
+  flip(listOf(bubble), () => {
     bubble.hidden = true;
     tailTarget = null;
   });
 }
 
-/* ---------- Views ---------- */
+function shake(node) {
+  if (moving()) node.animate(SHAKE, { duration: 420, easing: 'ease-out' });
+}
+
+/* ---------- Rows shared by both lists ---------- */
+
+function setBusy(row, busy) {
+  row.busy = busy;
+  row.classList.toggle('busy', busy);
+  row.setAttribute('aria-busy', String(busy));
+}
+
+function actButton(className, iconId, label) {
+  const button = el('button', `act ${className}`);
+  button.type = 'button';
+  button.setAttribute('aria-label', label);
+  button.append(icon(iconId));
+  return button;
+}
+
+function field(label, value, max, className = 'field') {
+  const input = el('input', className);
+  input.type = 'text';
+  input.value = value;
+  input.maxLength = max;
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.setAttribute('aria-label', label);
+  return input;
+}
+
+function skeleton(list, count) {
+  const ghosts = Array.from({ length: count }, () => {
+    const row = el('li', 'row ghost');
+    row.setAttribute('aria-hidden', 'true');
+    row.innerHTML =
+      '<span class="thumb"><span class="sheen"></span></span>' +
+      '<span class="info"><span class="line long"><span class="sheen"></span></span>' +
+      '<span class="line short"><span class="sheen"></span></span></span>';
+    return row;
+  });
+  list.replaceChildren(...ghosts);
+}
+
+/** Removes a row with a slide, closes the gap smoothly and keeps keyboard focus nearby. */
+function removeRow(row, focusSelector, fallback, done) {
+  const list = listOf(row);
+  const neighbor = row.nextElementSibling || row.previousElementSibling;
+  const hadFocus = row.contains(document.activeElement);
+  const finish = () => {
+    flip(list, () => row.remove());
+    done?.();
+    if (!hadFocus) return;
+    const target = neighbor?.isConnected && neighbor.querySelector(focusSelector);
+    (target || fallback()).focus();
+  };
+  if (row.contains(bubble)) unsay();
+  if (!moving()) {
+    finish();
+    return;
+  }
+  row.style.pointerEvents = 'none';
+  row
+    .animate(
+      [
+        { opacity: 1, transform: 'none' },
+        { opacity: 0, transform: 'translateX(-32px)' },
+      ],
+      { duration: 200, easing: 'ease-in', fill: 'forwards' },
+    )
+    .finished.then(finish, finish);
+}
+
+function disarm(button) {
+  clearTimeout(button.disarmTimer);
+  if (!button.classList.contains('confirming')) return;
+  button.classList.remove('confirming');
+  button.setAttribute('aria-label', button.dataset.label);
+}
+
+/** First tap of a two-tap delete: the button turns into a red question for a few seconds. */
+function arm(button, question) {
+  for (const other of document.querySelectorAll('.del.confirming')) disarm(other);
+  button.dataset.label = button.getAttribute('aria-label');
+  button.classList.add('confirming');
+  button.setAttribute('aria-label', `${question} Tocá de nuevo para borrar.`);
+  announce('Tocá de nuevo para borrar.');
+  button.disarmTimer = setTimeout(() => disarm(button), CONFIRM_MS);
+}
+
+/* ---------- Views and navigation ---------- */
 
 function showGate(message) {
   unsay();
   panel.hidden = true;
+  plist.replaceChildren();
   rows.replaceChildren();
+  projects = [];
   games = [];
+  current = null;
   gate.hidden = false;
   password.value = '';
   if (message) say(message, loginForm, password);
@@ -247,7 +425,6 @@ function showGate(message) {
 }
 
 function showPanel() {
-  unsay();
   gate.hidden = true;
   panel.hidden = false;
 }
@@ -256,7 +433,425 @@ function expired() {
   showGate(ERR_EXPIRED);
 }
 
-/* ---------- List ---------- */
+/** `/admin` lists the projects; `/admin/pong` opens the games of the project `pong`. */
+function pathSlug() {
+  const match = /^\/admin\/([^/]+)\/?$/.exec(location.pathname);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]).toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function navigate(path) {
+  if (location.pathname !== path) history.pushState(null, '', path);
+  return route();
+}
+
+let routing = 0;
+
+async function route({ focusRow = null } = {}) {
+  const ticket = ++routing;
+  unsay();
+  const slug = pathSlug();
+  const loaded = await loadProjects();
+  if (ticket !== routing || !loaded) return;
+  if (!slug) {
+    showProjects({ focusRow });
+    return;
+  }
+  const project = projects.find((entry) => entry.slug === slug);
+  if (!project) {
+    history.replaceState(null, '', '/admin');
+    showProjects();
+    say('No encontramos ese proyecto.', maker, makerTitle);
+    return;
+  }
+  await openGames(project, ticket);
+}
+
+async function loadProjects() {
+  const wait = setTimeout(() => {
+    showPanel();
+    showView(projectsView);
+    skeleton(plist, 4);
+  }, SKELETON_DELAY);
+  const { status, data } = await api('GET', '/api/admin/projects');
+  clearTimeout(wait);
+  if (status === 401) {
+    showGate();
+    return false;
+  }
+  showPanel();
+  if (status !== 200) {
+    showView(projectsView);
+    plist.replaceChildren();
+    say(data.error || ERR_LOAD, maker, makerTitle);
+    return false;
+  }
+  projects = Array.isArray(data.projects) ? data.projects : [];
+  return true;
+}
+
+function showView(view) {
+  projectsView.hidden = view !== projectsView;
+  gamesView.hidden = view !== gamesView;
+}
+
+/* ---------- Projects screen ---------- */
+
+const projectOf = (row) => projects.find((project) => project.id === row.dataset.id);
+
+function coverOf(project) {
+  const cover = el('span', 'thumb cover');
+  if (project.recent?.length) {
+    const img = document.createElement('img');
+    img.src = thumbUrl(project.recent[0]);
+    img.alt = '';
+    img.width = 144;
+    img.height = 108;
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    cover.append(img);
+  } else {
+    cover.classList.add('none');
+    cover.append(icon('i-puzzle'));
+  }
+  return cover;
+}
+
+function buildProjectRow(project) {
+  const row = el('li', 'row prow');
+  row.dataset.id = project.id;
+
+  const open = el('a', 'plink');
+  open.href = `/admin/${project.slug}`;
+  open.setAttribute('aria-label', `Abrir «${project.title}», ${plural(project.total, 'juego', 'juegos')}`);
+  const info = el('span', 'info');
+  const title = el('span', 'row-title');
+  title.append(el('span', 'ptitle', project.title), icon('i-caret', 'icon caret'));
+  const meta = el('span', 'row-meta pmeta');
+  meta.append(el('span', 'slug', `/${project.slug}`));
+  for (const grade of GRADES) {
+    const tally = el('span', 'tally');
+    tally.dataset.g = grade;
+    tally.append(el('b', '', grade), ` ${project.counts[grade]}`);
+    meta.append(' ', tally);
+  }
+  info.append(title, meta);
+  open.append(coverOf(project), info);
+
+  const toggle = el('button', 'switch');
+  toggle.type = 'button';
+  toggle.setAttribute('role', 'switch');
+  toggle.setAttribute('aria-checked', String(project.listed));
+  toggle.setAttribute('aria-label', `Mostrar «${project.title}» en el inicio`);
+  toggle.innerHTML = '<span class="track" aria-hidden="true"><span class="knob"></span></span>';
+  toggle.append(el('span', 'switch-label', 'En el inicio'));
+
+  const acts = el('div', 'acts');
+  const copy = actButton('copy', 'i-copy', `Copiar el link de «${project.title}»`);
+  const label = el('span', 'act-label', 'Copiar link');
+  label.setAttribute('aria-hidden', 'true');
+  copy.append(label);
+  const copied = el('span', 'pill copied', 'Copiado');
+  copied.setAttribute('aria-hidden', 'true');
+  copy.append(copied);
+  const del = actButton('del', 'i-trash', `Borrar «${project.title}»`);
+  const question = project.total ? `¿Borrar con ${plural(project.total, 'juego', 'juegos')}?` : '¿Borrar?';
+  const sure = el('span', 'pill sure', question);
+  sure.setAttribute('aria-hidden', 'true');
+  del.append(sure);
+  acts.append(copy, actButton('edit', 'i-edit', `Editar «${project.title}»`), del);
+
+  row.append(open, toggle, acts);
+  return row;
+}
+
+function showProjects({ focusRow = null } = {}) {
+  current = null;
+  document.title = 'Panel de juegos';
+  headLabel.textContent = 'Panel';
+  upLink.hidden = true;
+  showView(projectsView);
+  const items = projects.map(buildProjectRow);
+  plist.replaceChildren(...items);
+  pnothing.hidden = items.length > 0;
+  rise(items);
+  if (focusRow) plist.querySelector(`.row[data-id="${CSS.escape(focusRow)}"] .plink`)?.focus();
+}
+
+let slugTouched = false;
+
+makerTitle.addEventListener('input', () => {
+  if (bubble.previousElementSibling === maker) unsay();
+  if (!slugTouched) makerSlug.value = slugify(makerTitle.value);
+});
+
+makerSlug.addEventListener('input', () => {
+  if (bubble.previousElementSibling === maker) unsay();
+  tidySlugField(makerSlug);
+  // An emptied slug goes back to following the title.
+  slugTouched = makerSlug.value !== '';
+  if (!slugTouched) makerSlug.value = slugify(makerTitle.value);
+});
+
+maker.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (maker.busy) return;
+  const title = makerTitle.value.trim();
+  const slug = finalSlug(makerSlug.value) || slugify(title);
+  if (!title) {
+    shake(maker);
+    say('Escribí el nombre del proyecto.', maker, makerTitle);
+    makerTitle.focus();
+    return;
+  }
+  if (title.length > MAX_PROJECT_TITLE) {
+    say(`El nombre puede tener hasta ${MAX_PROJECT_TITLE} caracteres.`, maker, makerTitle);
+    return;
+  }
+  const problem = slugProblem(slug, null);
+  if (problem) {
+    shake(maker);
+    say(problem, maker, makerSlug);
+    makerSlug.focus();
+    return;
+  }
+
+  maker.busy = true;
+  const { status, data } = await api('POST', '/api/admin/projects', { title, slug });
+  maker.busy = false;
+  if (status === 401) return expired();
+  if (status !== 201) {
+    shake(maker);
+    say(data.error || ERR_SAVE, maker, status === 409 || status === 400 ? makerSlug : makerTitle);
+    return;
+  }
+  unsay();
+  makerTitle.value = '';
+  makerSlug.value = '';
+  slugTouched = false;
+  projects.unshift(data.project);
+  const row = buildProjectRow(data.project);
+  flip(plist, () => plist.prepend(row));
+  pnothing.hidden = true;
+  if (moving()) row.animate(POP, { duration: 320, easing: SPRING });
+  flash(row);
+  announce(`Creaste «${data.project.title}». Su link es ${location.origin}/${data.project.slug}.`);
+  // The next thing a teacher does is copy the link for the bookmarks bar.
+  row.querySelector('.copy').focus();
+});
+
+async function toggleListed(row, button) {
+  const project = projectOf(row);
+  if (!project || row.busy) return;
+  const next = !project.listed;
+  button.setAttribute('aria-checked', String(next));
+  setBusy(row, true);
+  const { status, data } = await api('PATCH', projectPath(project), { listed: next });
+  setBusy(row, false);
+  if (status === 401) return expired();
+  if (status !== 200) {
+    button.setAttribute('aria-checked', String(project.listed));
+    say(data.error || ERR_SAVE, row, button);
+    return;
+  }
+  Object.assign(project, data.project);
+  announce(next ? `«${project.title}» aparece en el inicio.` : `«${project.title}» ya no aparece en el inicio.`);
+}
+
+function copyFallback(text) {
+  const area = el('textarea', 'sr-only');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  document.body.append(area);
+  area.select();
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch {
+    copied = false;
+  }
+  area.remove();
+  return copied;
+}
+
+async function copyLink(row, button) {
+  const project = projectOf(row);
+  if (!project) return;
+  const url = `${location.origin}/${project.slug}`;
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(url);
+    copied = true;
+  } catch {
+    copied = copyFallback(url);
+  }
+  if (!copied) {
+    say(`No se pudo copiar. El link es ${url}`, row, button, { info: true });
+    return;
+  }
+  clearTimeout(button.doneTimer);
+  button.classList.add('done');
+  button.querySelector('use').setAttribute('href', '#i-check');
+  announce(`Copiaste el link: ${url}`);
+  button.doneTimer = setTimeout(() => {
+    button.classList.remove('done');
+    button.querySelector('use').setAttribute('href', '#i-copy');
+  }, 1600);
+}
+
+function slugField(value) {
+  const wrap = el('label', 'slug-slot field-slug');
+  wrap.append(el('span', 'slug-slash', '/'), field('Dirección', value, MAX_SLUG, 'slug-input'));
+  wrap.firstChild.setAttribute('aria-hidden', 'true');
+  return wrap;
+}
+
+function cancelOtherEdits(except) {
+  for (const row of document.querySelectorAll('.row.editing')) {
+    if (row === except) continue;
+    if (row.contains(bubble)) unsay();
+    if (row.classList.contains('prow')) {
+      const project = projectOf(row);
+      if (project) row.replaceWith(buildProjectRow(project));
+    } else {
+      const game = gameOf(row);
+      if (game) row.replaceWith(buildGameRow(game));
+    }
+  }
+}
+
+function startProjectEdit(row) {
+  const project = projectOf(row);
+  if (!project || row.busy || row.classList.contains('editing')) return;
+  cancelOtherEdits(row);
+  if (row.contains(bubble)) unsay();
+  const title = field('Nombre del proyecto', project.title, MAX_PROJECT_TITLE);
+  const slug = slugField(project.slug);
+  const box = el('div', 'pedit');
+  const fields = el('div', 'info');
+  fields.append(title, slug);
+  box.append(coverOf(project), fields);
+  flip(plist, () => {
+    row.classList.add('editing');
+    row.querySelector('.plink').replaceWith(box);
+    row.querySelector('.acts').replaceChildren(actButton('save', 'i-check', 'Guardar'), actButton('cancel', 'i-x', 'Cancelar'));
+  });
+  title.focus();
+  title.select();
+}
+
+function endProjectEdit(row, project, { saved = false } = {}) {
+  if (row.contains(bubble)) unsay();
+  const fresh = buildProjectRow(project);
+  flip(plist, () => row.replaceWith(fresh));
+  fresh.querySelector('.edit').focus();
+  if (saved) flash(fresh);
+  return fresh;
+}
+
+async function saveProjectEdit(row) {
+  const project = projectOf(row);
+  if (!project || row.busy) return;
+  const titleInput = row.querySelector('.field');
+  const slugInput = row.querySelector('.slug-input');
+  const title = titleInput.value.trim();
+  const slug = finalSlug(slugInput.value);
+  titleInput.removeAttribute('aria-invalid');
+  slugInput.removeAttribute('aria-invalid');
+
+  const slugIssue = slug === project.slug ? null : slugProblem(slug, project);
+  const problem =
+    (!title && ['El nombre no puede quedar vacío.', titleInput]) ||
+    (title.length > MAX_PROJECT_TITLE && [`El nombre puede tener hasta ${MAX_PROJECT_TITLE} caracteres.`, titleInput]) ||
+    (slugIssue && [slugIssue, slugInput]);
+  if (problem) {
+    const [message, input] = problem;
+    input.setAttribute('aria-invalid', 'true');
+    say(message, input.closest('.slug-slot') ?? input, input);
+    input.focus();
+    return;
+  }
+
+  const changes = {};
+  if (title !== project.title) changes.title = title;
+  if (slug !== project.slug) changes.slug = slug;
+  if (Object.keys(changes).length === 0) {
+    endProjectEdit(row, project);
+    return;
+  }
+
+  setBusy(row, true);
+  const { status, data } = await api('PATCH', projectPath(project), changes);
+  setBusy(row, false);
+  if (status === 401) return expired();
+  if (status !== 200) {
+    const input = status === 409 || /direcci/.test(data.error ?? '') ? slugInput : titleInput;
+    say(data.error || ERR_SAVE, input.closest('.slug-slot') ?? input, input);
+    return;
+  }
+  Object.assign(project, data.project);
+  const fresh = endProjectEdit(row, project, { saved: true });
+  if (changes.slug) {
+    // Old bookmarks now land on the not-found page, so say it plainly.
+    say(`El link ahora es /${project.slug}. Copialo de nuevo para los marcadores.`, fresh, fresh.querySelector('.copy'), {
+      info: true,
+    });
+  } else {
+    announce(`Guardaste «${project.title}».`);
+  }
+}
+
+async function removeProject(row, button) {
+  const project = projectOf(row);
+  if (!project || row.busy) return;
+  if (!button.classList.contains('confirming')) {
+    arm(button, button.querySelector('.sure').textContent);
+    return;
+  }
+  clearTimeout(button.disarmTimer);
+  setBusy(row, true);
+  const { status, data } = await api('DELETE', projectPath(project));
+  if (status === 401) return expired();
+  if (status !== 200 && status !== 404) {
+    setBusy(row, false);
+    disarm(button);
+    say(data.error || ERR_SAVE, row, button);
+    return;
+  }
+  projects = projects.filter((entry) => entry !== project);
+  const gone = data.games ?? project.total;
+  announce(gone ? `Borraste «${project.title}» y ${plural(gone, 'juego', 'juegos')}.` : `Borraste «${project.title}».`);
+  removeRow(row, '.del', () => makerTitle, () => {
+    pnothing.hidden = plist.children.length > 0;
+  });
+}
+
+plist.addEventListener('click', (event) => {
+  const row = event.target.closest('.row');
+  if (!row || row.classList.contains('ghost')) return;
+  const link = event.target.closest('.plink');
+  if (link) {
+    // Keep new-tab clicks working; a plain click stays in this page.
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    navigate(new URL(link.href).pathname);
+    return;
+  }
+  const button = event.target.closest('button');
+  if (!button) return;
+  if (button.classList.contains('switch')) toggleListed(row, button);
+  else if (button.classList.contains('copy')) copyLink(row, button);
+  else if (button.classList.contains('edit')) startProjectEdit(row);
+  else if (button.classList.contains('save')) saveProjectEdit(row);
+  else if (button.classList.contains('cancel')) endProjectEdit(row, projectOf(row));
+  else if (button.classList.contains('del')) removeProject(row, button);
+});
+
+/* ---------- Games screen ---------- */
 
 const visibleGames = () => (filter === 'all' ? games : games.filter((game) => game.grade === filter));
 
@@ -283,15 +878,7 @@ function currentPip(grade) {
   return pip;
 }
 
-function actButton(className, iconId, label) {
-  const button = el('button', `act ${className}`);
-  button.type = 'button';
-  button.setAttribute('aria-label', label);
-  button.append(icon(iconId));
-  return button;
-}
-
-function buildRow(game) {
+function buildGameRow(game) {
   const row = el('li', 'row');
   row.dataset.id = game.id;
   row.dataset.grade = game.grade;
@@ -326,27 +913,13 @@ function buildRow(game) {
 
   const acts = el('div', 'acts');
   const del = actButton('del', 'i-trash', `Borrar «${game.title}»`);
-  const sure = el('span', 'sure', '¿Seguro?');
+  const sure = el('span', 'pill sure', '¿Seguro?');
   sure.setAttribute('aria-hidden', 'true');
   del.append(sure);
   acts.append(actButton('edit', 'i-edit', `Editar «${game.title}»`), del);
 
   row.append(link, info, mover, acts);
   return row;
-}
-
-function renderSkeleton() {
-  const ghosts = Array.from({ length: 6 }, () => {
-    const row = el('li', 'row ghost');
-    row.setAttribute('aria-hidden', 'true');
-    row.innerHTML =
-      '<span class="thumb"><span class="sheen"></span></span>' +
-      '<span class="info"><span class="line long"><span class="sheen"></span></span>' +
-      '<span class="line short"><span class="sheen"></span></span></span>';
-    return row;
-  });
-  nothing.hidden = true;
-  rows.replaceChildren(...ghosts);
 }
 
 function updateCounts({ pop = false } = {}) {
@@ -369,84 +942,44 @@ function showNothing() {
   if (empty) nothingText.textContent = filter === 'all' ? 'Todavía no hay juegos.' : `No hay juegos en ${filter}.`;
 }
 
-function render({ stagger = false } = {}) {
+function renderGames({ stagger = false } = {}) {
   unsay();
-  const items = visibleGames().map(buildRow);
+  const items = visibleGames().map(buildGameRow);
   rows.replaceChildren(...items);
   showNothing();
   updateCounts();
-  if (!stagger || !moving()) return;
-  items.slice(0, 12).forEach((row, i) => {
-    row.animate(
-      [
-        { opacity: 0, transform: 'translateY(8px)' },
-        { opacity: 1, transform: 'none' },
-      ],
-      { duration: 240, delay: i * 18, easing: SETTLE, fill: 'backwards' },
-    );
-  });
+  if (stagger) rise(items);
 }
 
-async function load() {
-  sheet.setAttribute('aria-busy', 'true');
-  const skeleton = setTimeout(() => {
-    showPanel();
-    renderSkeleton();
-  }, SKELETON_DELAY);
-  const { status, data } = await api('GET', '/api/admin/games');
-  clearTimeout(skeleton);
-  sheet.setAttribute('aria-busy', 'false');
-  if (status === 401) {
-    showGate();
-    return false;
-  }
-  showPanel();
+function setFilter(next) {
+  filter = next;
+  for (const button of filterButtons) button.setAttribute('aria-pressed', String(button.dataset.f === next));
+}
+
+async function openGames(project, ticket) {
+  current = project;
+  games = [];
+  setFilter('all');
+  document.title = `${project.title} · Panel`;
+  headLabel.textContent = project.title;
+  upLink.hidden = false;
+  showView(gamesView);
+  rows.replaceChildren();
+  nothing.hidden = true;
+  updateCounts();
+  const wait = setTimeout(() => skeleton(rows, 6), SKELETON_DELAY);
+  const { status, data } = await api('GET', `${projectPath(project)}/games`);
+  clearTimeout(wait);
+  if (ticket !== routing) return;
+  if (status === 401) return expired();
   if (status !== 200) {
-    games = [];
     rows.replaceChildren();
-    updateCounts();
     say(data.error || ERR_LOAD, filtersBox, filterButtons[0]);
-    return false;
-  }
-  games = Array.isArray(data.games) ? data.games : [];
-  render({ stagger: true });
-  return true;
-}
-
-/** Removes a row with a slide, closes the gap smoothly and keeps keyboard focus nearby. */
-function removeRow(row, focusSelector) {
-  const neighbor = row.nextElementSibling || row.previousElementSibling;
-  const hadFocus = row.contains(document.activeElement);
-  const finish = () => {
-    flip(() => row.remove());
-    showNothing();
-    if (!hadFocus) return;
-    const target = neighbor?.isConnected && neighbor.querySelector(focusSelector);
-    (target || filterButtons.find((button) => button.dataset.f === filter)).focus();
-  };
-  if (row.contains(bubble)) unsay();
-  if (!moving()) {
-    finish();
     return;
   }
-  row.style.pointerEvents = 'none';
-  row
-    .animate(
-      [
-        { opacity: 1, transform: 'none' },
-        { opacity: 0, transform: 'translateX(-32px)' },
-      ],
-      { duration: 200, easing: 'ease-in', fill: 'forwards' },
-    )
-    .finished.then(finish, finish);
-}
-
-/* ---------- Row actions ---------- */
-
-function setBusy(row, busy) {
-  row.busy = busy;
-  row.classList.toggle('busy', busy);
-  row.setAttribute('aria-busy', String(busy));
+  games = Array.isArray(data.games) ? data.games : [];
+  renderGames({ stagger: true });
+  head.focus({ preventScroll: true });
 }
 
 async function move(row, target) {
@@ -468,10 +1001,10 @@ async function move(row, target) {
   announce(`«${game.title}» ahora está en ${target}.`);
 
   if (filter !== 'all') {
-    removeRow(row, '.pip[data-move]');
+    removeRow(row, '.pip[data-move]', () => filterButtons.find((b) => b.dataset.f === filter), showNothing);
     return;
   }
-  const fresh = buildRow(game);
+  const fresh = buildGameRow(game);
   row.replaceWith(fresh);
   // Focus the way back, so an accidental move is one keypress away from undone.
   fresh.querySelector(`[data-move="${from}"]`).focus();
@@ -484,52 +1017,31 @@ async function move(row, target) {
   flash(fresh);
 }
 
-function field(label, value) {
-  const input = el('input', 'field');
-  input.type = 'text';
-  input.value = value;
-  input.maxLength = MAX_TEXT;
-  input.autocomplete = 'off';
-  input.spellcheck = false;
-  input.setAttribute('aria-label', label);
-  return input;
-}
-
-function cancelOtherEdits(except) {
-  for (const row of rows.querySelectorAll('.row.editing')) {
-    if (row === except) continue;
-    if (row.contains(bubble)) unsay();
-    const game = gameOf(row);
-    if (game) row.replaceWith(buildRow(game));
-  }
-}
-
-function startEdit(row) {
+function startGameEdit(row) {
   const game = gameOf(row);
   if (!game || row.busy || row.classList.contains('editing')) return;
   cancelOtherEdits(row);
   if (row.contains(bubble)) unsay();
-  const title = field('Título', game.title);
-  const name = field('Nombre', game.name);
-  const acts = row.querySelector('.acts');
-  flip(() => {
+  const title = field('Título', game.title, MAX_TEXT);
+  const name = field('Nombre', game.name, MAX_TEXT);
+  flip(rows, () => {
     row.classList.add('editing');
     row.querySelector('.info').replaceChildren(title, name);
-    acts.replaceChildren(actButton('save', 'i-check', 'Guardar'), actButton('cancel', 'i-x', 'Cancelar'));
+    row.querySelector('.acts').replaceChildren(actButton('save', 'i-check', 'Guardar'), actButton('cancel', 'i-x', 'Cancelar'));
   });
   title.focus();
   title.select();
 }
 
-function endEdit(row, game, { saved = false } = {}) {
+function endGameEdit(row, game, { saved = false } = {}) {
   if (row.contains(bubble)) unsay();
-  const fresh = buildRow(game);
-  flip(() => row.replaceWith(fresh));
+  const fresh = buildGameRow(game);
+  flip(rows, () => row.replaceWith(fresh));
   fresh.querySelector('.edit').focus();
   if (saved) flash(fresh);
 }
 
-async function saveEdit(row) {
+async function saveGameEdit(row) {
   const game = gameOf(row);
   if (!game || row.busy) return;
   const [titleInput, nameInput] = row.querySelectorAll('.field');
@@ -555,7 +1067,7 @@ async function saveEdit(row) {
   if (title !== game.title) changes.title = title;
   if (name !== game.name) changes.name = name;
   if (Object.keys(changes).length === 0) {
-    endEdit(row, game);
+    endGameEdit(row, game);
     return;
   }
 
@@ -568,31 +1080,15 @@ async function saveEdit(row) {
     return;
   }
   Object.assign(game, data.game);
-  endEdit(row, game, { saved: true });
+  endGameEdit(row, game, { saved: true });
   announce(`Guardaste «${game.title}».`);
 }
 
-function disarm(button) {
-  clearTimeout(button.disarmTimer);
-  if (!button.classList.contains('confirming')) return;
-  button.classList.remove('confirming');
-  button.setAttribute('aria-label', button.dataset.label);
-}
-
-function arm(button, game) {
-  button.dataset.label = button.getAttribute('aria-label');
-  button.classList.add('confirming');
-  button.setAttribute('aria-label', `¿Seguro? Tocá de nuevo para borrar «${game.title}»`);
-  announce('Tocá de nuevo para borrar.');
-  button.disarmTimer = setTimeout(() => disarm(button), CONFIRM_MS);
-}
-
-async function remove(row, button) {
+async function removeGame(row, button) {
   const game = gameOf(row);
   if (!game || row.busy) return;
   if (!button.classList.contains('confirming')) {
-    for (const other of rows.querySelectorAll('.del.confirming')) disarm(other);
-    arm(button, game);
+    arm(button, '¿Seguro?');
     return;
   }
   clearTimeout(button.disarmTimer);
@@ -609,7 +1105,7 @@ async function remove(row, button) {
   games = games.filter((entry) => entry !== game);
   updateCounts({ pop: true });
   announce(`Borraste «${game.title}».`);
-  removeRow(row, '.del');
+  removeRow(row, '.del', () => filterButtons.find((b) => b.dataset.f === filter), showNothing);
 }
 
 rows.addEventListener('click', (event) => {
@@ -617,44 +1113,51 @@ rows.addEventListener('click', (event) => {
   const row = button?.closest('.row');
   if (!row || row.classList.contains('ghost')) return;
   if (button.dataset.move) move(row, button.dataset.move);
-  else if (button.classList.contains('edit')) startEdit(row);
-  else if (button.classList.contains('save')) saveEdit(row);
-  else if (button.classList.contains('cancel')) endEdit(row, gameOf(row));
-  else if (button.classList.contains('del')) remove(row, button);
+  else if (button.classList.contains('edit')) startGameEdit(row);
+  else if (button.classList.contains('save')) saveGameEdit(row);
+  else if (button.classList.contains('cancel')) endGameEdit(row, gameOf(row));
+  else if (button.classList.contains('del')) removeGame(row, button);
 });
-
-rows.addEventListener('keydown', (event) => {
-  const row = event.target.closest('.row');
-  if (!row) return;
-  if (event.target.classList.contains('field')) {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      saveEdit(row);
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      if (!row.busy) endEdit(row, gameOf(row));
-    }
-  } else if (event.key === 'Escape' && event.target.classList.contains('confirming')) {
-    disarm(event.target);
-  }
-});
-
-rows.addEventListener('input', (event) => {
-  if (!event.target.classList.contains('field')) return;
-  event.target.removeAttribute('aria-invalid');
-  if (event.target.closest('.row').contains(bubble)) unsay();
-});
-
-/* ---------- Filters and session ---------- */
 
 for (const button of filterButtons) {
   button.addEventListener('click', () => {
     if (button.dataset.f === filter) return;
-    filter = button.dataset.f;
-    for (const other of filterButtons) other.setAttribute('aria-pressed', String(other === button));
-    render({ stagger: true });
+    setFilter(button.dataset.f);
+    renderGames({ stagger: true });
   });
 }
+
+/* ---------- Keyboard and typing in both lists ---------- */
+
+for (const list of [plist, rows]) {
+  list.addEventListener('keydown', (event) => {
+    const row = event.target.closest('.row');
+    if (!row) return;
+    const project = row.classList.contains('prow');
+    if (event.target.matches('.field, .slug-input')) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (project) saveProjectEdit(row);
+        else saveGameEdit(row);
+      } else if (event.key === 'Escape' && !row.busy) {
+        event.preventDefault();
+        if (project) endProjectEdit(row, projectOf(row));
+        else endGameEdit(row, gameOf(row));
+      }
+    } else if (event.key === 'Escape' && event.target.classList.contains('confirming')) {
+      disarm(event.target);
+    }
+  });
+
+  list.addEventListener('input', (event) => {
+    if (event.target.classList.contains('slug-input')) tidySlugField(event.target);
+    if (!event.target.matches('.field, .slug-input')) return;
+    event.target.removeAttribute('aria-invalid');
+    if (event.target.closest('.row').contains(bubble)) unsay();
+  });
+}
+
+/* ---------- Session ---------- */
 
 let entering = false;
 
@@ -662,7 +1165,7 @@ loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (entering) return;
   if (!password.value) {
-    if (moving()) loginForm.animate(SHAKE, { duration: 420, easing: 'ease-out' });
+    shake(loginForm);
     password.focus();
     return;
   }
@@ -672,13 +1175,14 @@ loginForm.addEventListener('submit', async (event) => {
   entering = false;
   enterButton.removeAttribute('aria-disabled');
   if (status !== 200) {
-    if (moving()) loginForm.animate(SHAKE, { duration: 420, easing: 'ease-out' });
+    shake(loginForm);
     say(data.error || ERR_OFFLINE, loginForm, password);
     password.select();
     return;
   }
   password.value = '';
-  if (await load()) {
+  await route();
+  if (!panel.hidden) {
     head.focus({ preventScroll: true });
     announce('Entraste al panel.');
   }
@@ -692,9 +1196,23 @@ outButton.addEventListener('click', async () => {
   announce('Saliste del panel.');
 });
 
+upLink.addEventListener('click', (event) => {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+  event.preventDefault();
+  const from = current?.id ?? null;
+  if (location.pathname !== '/admin') history.pushState(null, '', '/admin');
+  route({ focusRow: from });
+});
+
+window.addEventListener('popstate', () => route());
+
 /* ---------- Start ---------- */
 
 addShape(loginForm);
 addShape(head);
+addShape(maker);
 addShape(bubble);
-load();
+if (location.pathname.endsWith('/')) {
+  history.replaceState(null, '', location.pathname.replace(/\/+$/, '') || '/admin');
+}
+route();

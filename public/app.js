@@ -13,6 +13,13 @@ const GRAVITY = 1700;
 const CONFETTI = ['#4c97ff', '#9966ff', '#cf63cf', '#ffab19', '#ffbf00', '#5cb1d6', '#59c059', '#ff8c1a', '#ff6680'];
 
 const root = document.documentElement;
+const home = document.querySelector('.home');
+const shelf = home.querySelector('.projects');
+const homeEmpty = home.querySelector('.home-empty');
+const missing = document.querySelector('.missing');
+const lostHat = missing.querySelector('.lost');
+const note = missing.querySelector('.note');
+const crumbs = [...document.querySelectorAll('.crumb')];
 const landing = document.querySelector('.landing');
 const picks = [...landing.querySelectorAll('.pick')];
 const board = document.querySelector('.board');
@@ -82,6 +89,8 @@ function draw(el, w, h) {
     const tip = Math.min(Math.max(inputLeft + 16 - bubble.offsetLeft, 24), w - 48);
     d = bubblePath(w, h, tip + TAIL_TIP);
     bubble.style.transformOrigin = `${tip}px -18px`;
+  } else if (el === note) {
+    d = bubblePath(w, h, 44 + TAIL_TIP);
   } else {
     const s = parseFloat(getComputedStyle(el).getPropertyValue('--s')) || 1;
     d = blockPath(w, h, s, { hat: el.classList.contains('hat'), notch: el.classList.contains('cmd') });
@@ -239,6 +248,8 @@ function burst(card) {
 
 /* ---------- Grade ---------- */
 
+/** The project this page belongs to: `{ slug, title, listed }`, or null on the home. */
+let project = null;
 let grade = null;
 let introUntil = 0;
 let hatDrop = null;
@@ -260,7 +271,7 @@ function setGrade(next) {
   form.dataset.g = next;
   hatLabel.textContent = next;
   for (const chip of chips) chip.setAttribute('aria-pressed', String(chip.dataset.g === next));
-  document.title = `Juegos ${next}`;
+  document.title = `${project.title} · ${next}`;
   paintChrome(next);
   try {
     localStorage.setItem(STORAGE_KEY, next);
@@ -271,6 +282,7 @@ function setGrade(next) {
 
 function showLanding() {
   landing.hidden = false;
+  document.title = project.title;
   if (!moving()) return;
   picks.forEach((pick, i) => {
     pick.animate(LAND, { duration: 780, delay: 120 + i * 120, fill: 'backwards' });
@@ -453,7 +465,8 @@ async function load(g, { stagger = false, quiet = false } = {}) {
     skeletonTimer = setTimeout(renderSkeleton, Math.max(SKELETON_DELAY, introUntil - performance.now()));
   }
   try {
-    const response = await fetch(`/api/games?grade=${encodeURIComponent(g)}`, { signal: request.signal });
+    const query = `project=${encodeURIComponent(project.slug)}&grade=${encodeURIComponent(g)}`;
+    const response = await fetch(`/api/games?${query}`, { signal: request.signal });
     if (!response.ok) throw new Error('request failed');
     const data = await response.json();
     if (request.signal.aborted) return;
@@ -660,7 +673,7 @@ form.addEventListener('submit', async (event) => {
     const response = await fetch('/api/games', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, grade: g }),
+      body: JSON.stringify({ url, grade: g, project: project.slug }),
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.game) game = data.game;
@@ -691,7 +704,137 @@ form.addEventListener('submit', async (event) => {
   celebrate(game);
 });
 
+/* ---------- Home: the projects shelf ---------- */
+
+const LIFT = [
+  { transform: 'translateY(-48px) rotate(-2deg)', opacity: 0 },
+  { transform: 'none', opacity: 1 },
+];
+
+function mosaic(ids) {
+  const frame = document.createElement('span');
+  frame.className = 'frame mosaic';
+  if (ids.length === 0) {
+    frame.classList.add('none');
+    frame.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-puzzle"/></svg>';
+    return frame;
+  }
+  const tiles = document.createElement('span');
+  tiles.className = 'tiles';
+  tiles.dataset.n = String(ids.length);
+  frame.append(tiles);
+  for (const id of ids) {
+    const img = document.createElement('img');
+    img.src = thumb(id, 480, 360);
+    img.alt = '';
+    img.width = 480;
+    img.height = 360;
+    img.decoding = 'async';
+    tiles.append(img);
+  }
+  return frame;
+}
+
+function buildProject(entry) {
+  const card = document.createElement('li');
+  card.className = 'card project';
+  const link = document.createElement('a');
+  link.className = 'stage';
+  link.href = `/${entry.slug}`;
+  const count = entry.count === 1 ? '1 juego' : `${entry.count} juegos`;
+  link.setAttribute('aria-label', `${entry.title}, ${count}`);
+  const title = document.createElement('span');
+  title.className = 'title';
+  title.textContent = entry.title;
+  link.append(mosaic(entry.recent ?? []), title);
+  card.append(link);
+  return card;
+}
+
+async function showHome() {
+  home.hidden = false;
+  const skeleton = setTimeout(() => {
+    shelf.replaceChildren(
+      ...Array.from({ length: 3 }, () => {
+        const slot = document.createElement('li');
+        slot.className = 'card ghost';
+        slot.setAttribute('aria-hidden', 'true');
+        slot.innerHTML = '<span class="frame"><span class="sheen"></span></span>';
+        return slot;
+      }),
+    );
+  }, SKELETON_DELAY);
+  let list = null;
+  try {
+    const response = await fetch('/api/projects');
+    if (response.ok) list = (await response.json()).projects;
+  } catch {
+    list = null;
+  }
+  clearTimeout(skeleton);
+  if (!Array.isArray(list) || list.length === 0) {
+    shelf.replaceChildren();
+    homeEmpty.hidden = false;
+    if (!list) homeEmpty.querySelector('.home-empty-text').textContent = 'No se pudieron cargar los proyectos.';
+    return;
+  }
+  const cards = list.map(buildProject);
+  shelf.replaceChildren(...cards);
+  if (!moving()) return;
+  cards.forEach((card, i) => {
+    card.animate(LIFT, { duration: 520, delay: 80 + Math.min(i, STAGGER_CAP) * 70, easing: SPRING, fill: 'backwards' });
+  });
+}
+
+/* ---------- A project that does not exist ---------- */
+
+function showMissing(message) {
+  missing.hidden = false;
+  if (message) note.querySelector('.say-text').textContent = message;
+  if (!moving()) return;
+  lostHat.animate(HAT_DROP, { duration: 620, delay: 80, fill: 'backwards' });
+  note.animate(POP, { duration: 320, delay: 520, easing: SPRING, fill: 'backwards' });
+}
+
 /* ---------- Start ---------- */
+
+/** `/` is the home; `/pong` is the project with slug `pong` (the server already lowercases it). */
+function routeSlug() {
+  const path = location.pathname.replace(/\/+$/, '');
+  if (!path || path === '/index.html') return null;
+  try {
+    return decodeURIComponent(path.slice(1)).toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+async function openProject(slug) {
+  let response = null;
+  try {
+    response = await fetch(`/api/projects/${encodeURIComponent(slug)}`);
+  } catch {
+    response = null;
+  }
+  if (!response?.ok) {
+    showMissing(response?.status === 404 ? null : 'No se pudo cargar. Recargá la página.');
+    return;
+  }
+  project = (await response.json()).project;
+  for (const crumb of crumbs) {
+    crumb.querySelector('.crumb-title').textContent = project.title;
+    // Only a listed project leads back home, so kids in a class project stay in it.
+    crumb.querySelector('.back').hidden = !project.listed;
+  }
+  let stored = null;
+  try {
+    stored = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    stored = null;
+  }
+  if (GRADES.includes(stored)) showBoard(stored);
+  else showLanding();
+}
 
 for (const el of picks) {
   addShape(el, ['ring', 'gap', 'body']);
@@ -700,14 +843,11 @@ for (const el of picks) {
 addShape(hat, ['body']);
 addShape(form, ['body']);
 addShape(bubble, ['body']);
+addShape(lostHat, ['body']);
+addShape(note, ['body']);
 
 for (const chip of chips) chip.addEventListener('click', () => switchGrade(chip.dataset.g));
 
-let stored = null;
-try {
-  stored = localStorage.getItem(STORAGE_KEY);
-} catch {
-  stored = null;
-}
-if (GRADES.includes(stored)) showBoard(stored);
-else showLanding();
+const slug = routeSlug();
+if (slug === null) showHome();
+else openProject(slug);

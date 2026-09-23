@@ -43,6 +43,24 @@
       <symbol id="i-stop" viewBox="0 0 256 256">
         <path d="M227.31,80.23,175.77,28.69A16.13,16.13,0,0,0,164.45,24H91.55a16.13,16.13,0,0,0-11.32,4.69L28.69,80.23A16.13,16.13,0,0,0,24,91.55v72.9a16.13,16.13,0,0,0,4.69,11.32l51.54,51.54A16.13,16.13,0,0,0,91.55,232h72.9a16.13,16.13,0,0,0,11.32-4.69l51.54-51.54A16.13,16.13,0,0,0,232,164.45V91.55A16.13,16.13,0,0,0,227.31,80.23Z" />
       </symbol>
+      <symbol id="i-info" viewBox="0 0 256 256">
+        <path d="M108,84a16,16,0,1,1,16,16A16,16,0,0,1,108,84Zm128,44A108,108,0,1,1,128,20,108.12,108.12,0,0,1,236,128Zm-24,0a84,84,0,1,0-84,84A84.09,84.09,0,0,0,212,128Zm-72,36.68V132a20,20,0,0,0-20-20,12,12,0,0,0-4,23.32V168a20,20,0,0,0,20,20,12,12,0,0,0,4-23.32Z" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 256 256">
+        <path d="M228,128a12,12,0,0,1-12,12H140v76a12,12,0,0,1-24,0V140H40a12,12,0,0,1,0-24h76V40a12,12,0,0,1,24,0v76h76A12,12,0,0,1,228,128Z" />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 256 256">
+        <path d="M216,28H88A12,12,0,0,0,76,40V76H40A12,12,0,0,0,28,88V216a12,12,0,0,0,12,12H168a12,12,0,0,0,12-12V180h36a12,12,0,0,0,12-12V40A12,12,0,0,0,216,28ZM156,204H52V100H156Zm48-48H180V88a12,12,0,0,0-12-12H100V52H204Z" />
+      </symbol>
+      <symbol id="i-back" viewBox="0 0 256 256">
+        <path d="M228,128a12,12,0,0,1-12,12H69l51.52,51.51a12,12,0,0,1-17,17l-72-72a12,12,0,0,1,0-17l72-72a12,12,0,0,1,17,17L69,116H216A12,12,0,0,1,228,128Z" />
+      </symbol>
+      <symbol id="i-caret" viewBox="0 0 256 256">
+        <path d="M184.49,136.49l-80,80a12,12,0,0,1-17-17L159,128,87.51,56.49a12,12,0,1,1,17-17l80,80A12,12,0,0,1,184.49,136.49Z" />
+      </symbol>
+      <symbol id="i-puzzle" viewBox="0 0 256 256">
+        <path d="M222.41,155.16a12,12,0,0,0-11.56-.69A16,16,0,0,1,188,139,16.2,16.2,0,0,1,202.8,124a15.83,15.83,0,0,1,8,1.5A12,12,0,0,0,228,114.7V72a20,20,0,0,0-20-20H176a40.15,40.15,0,0,0-12.62-29.16,39.67,39.67,0,0,0-29.94-10.76,40.08,40.08,0,0,0-37.34,37C96,50.07,96,51,96,52H64A20,20,0,0,0,44,72v28a40.15,40.15,0,0,0-29.16,12.62A40,40,0,0,0,41.1,179.9a28.3,28.3,0,0,0,2.9.1v28a20,20,0,0,0,20,20H208a20,20,0,0,0,20-20V165.31A12,12,0,0,0,222.41,155.16ZM204,204H68V165.31a12,12,0,0,0-17.15-10.84A15.9,15.9,0,0,1,42.8,156,16.2,16.2,0,0,1,28,141.06a16,16,0,0,1,22.82-15.52A12,12,0,0,0,68,114.7V76h42.7a12,12,0,0,0,10.83-17.15A15.9,15.9,0,0,1,120,50.8,16.19,16.19,0,0,1,134.94,36a16,16,0,0,1,15.53,22.81A12,12,0,0,0,161.31,76H204v24c-1,0-1.93,0-2.9.11A40,40,0,0,0,204,180h0Z" />
+      </symbol>
     </svg>
 
     <main class="gate" hidden>
@@ -67,39 +85,84 @@
 
     <main class="panel" hidden>
       <header class="bar">
-        <h1 class="block hat tool head" tabindex="-1">Panel<span class="sr-only"> de juegos</span></h1>
+        <div class="heading">
+          <a class="up" href="/admin" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-back" /></svg>
+            Proyectos
+          </a>
+          <h1 class="block hat tool head" tabindex="-1"><span class="head-label">Panel</span></h1>
+        </div>
         <button class="out" type="button">
           <svg class="icon" aria-hidden="true"><use href="#i-out" /></svg>
           Salir
         </button>
       </header>
 
-      <div class="filters" role="group" aria-label="Mostrar">
-        <button class="filter" type="button" data-f="all" aria-pressed="true">
-          <span class="label">Todos</span><span class="dot all"><span class="count">0</span></span>
-        </button>
-        <button class="filter" type="button" data-f="4N" aria-pressed="false">
-          <span class="label">4N</span><span class="dot" data-g="4N"><span class="count">0</span></span>
-        </button>
-        <button class="filter" type="button" data-f="4F" aria-pressed="false">
-          <span class="label">4F</span><span class="dot" data-g="4F"><span class="count">0</span></span>
-        </button>
-        <button class="filter" type="button" data-f="4S" aria-pressed="false">
-          <span class="label">4S</span><span class="dot" data-g="4S"><span class="count">0</span></span>
-        </button>
-      </div>
+      <section class="projects-view" aria-label="Proyectos" hidden>
+        <form class="block cmd tool maker" novalidate>
+          <svg class="icon maker-icon" aria-hidden="true"><use href="#i-plus" /></svg>
+          <input
+            class="slot maker-title"
+            type="text"
+            maxlength="60"
+            autocomplete="off"
+            placeholder="Nuevo proyecto"
+            aria-label="Nombre del proyecto nuevo"
+          />
+          <label class="slug-slot">
+            <span class="slug-slash" aria-hidden="true">/</span>
+            <input
+              class="maker-slug"
+              type="text"
+              maxlength="40"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="direccion"
+              aria-label="Dirección del proyecto nuevo"
+            />
+          </label>
+          <button class="enter" type="submit">Crear</button>
+        </form>
 
-      <section class="sheet" aria-label="Juegos" aria-busy="false">
-        <ul class="rows" role="list"></ul>
-        <p class="nothing" hidden>
-          <svg class="icon" aria-hidden="true"><use href="#i-tray" /></svg>
-          <span class="nothing-text"></span>
-        </p>
+        <section class="sheet" aria-busy="false">
+          <ul class="rows plist" role="list"></ul>
+          <p class="nothing" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-tray" /></svg>
+            <span class="nothing-text">Todavía no hay proyectos.</span>
+          </p>
+        </section>
+      </section>
+
+      <section class="games-view" hidden>
+        <div class="filters" role="group" aria-label="Mostrar">
+          <button class="filter" type="button" data-f="all" aria-pressed="true">
+            <span class="label">Todos</span><span class="dot all"><span class="count">0</span></span>
+          </button>
+          <button class="filter" type="button" data-f="4N" aria-pressed="false">
+            <span class="label">4N</span><span class="dot" data-g="4N"><span class="count">0</span></span>
+          </button>
+          <button class="filter" type="button" data-f="4F" aria-pressed="false">
+            <span class="label">4F</span><span class="dot" data-g="4F"><span class="count">0</span></span>
+          </button>
+          <button class="filter" type="button" data-f="4S" aria-pressed="false">
+            <span class="label">4S</span><span class="dot" data-g="4S"><span class="count">0</span></span>
+          </button>
+        </div>
+
+        <section class="sheet" aria-label="Juegos" aria-busy="false">
+          <ul class="rows glist" role="list"></ul>
+          <p class="nothing" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-tray" /></svg>
+            <span class="nothing-text"></span>
+          </p>
+        </section>
       </section>
     </main>
 
     <div class="say" hidden>
       <svg class="icon stop" aria-hidden="true"><use href="#i-stop" /></svg>
+      <svg class="icon hint" aria-hidden="true"><use href="#i-info" /></svg>
       <p class="say-text" id="say-text"></p>
     </div>
 

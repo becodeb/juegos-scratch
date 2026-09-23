@@ -11,9 +11,9 @@
       type="image/svg+xml"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -34.25 108 108'%3E%3Cpath d='M0,0 c25,-22 71,-22 96,0 H96 a4,4 0 0 1 4,4 V44 a4,4 0 0 1 -4,4 H48 c-2,0 -3,1 -4,2 l-4,4 c-1,1 -2,2 -4,2 h-12 c-2,0 -3,-1 -4,-2 l-4,-4 c-1,-1 -2,-2 -4,-2 H4 a4,4 0 0 1 -4,-4 Z' fill='%23FFBF00' stroke='%23CC9900' stroke-width='4'/%3E%3C/svg%3E"
     />
-    <link rel="preload" href="fonts/dynapuff-latin.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="stylesheet" href="styles.css?v=__V__" />
-    <script type="module" src="app.js?v=__V__"></script>
+    <link rel="preload" href="/fonts/dynapuff-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/styles.css?v=__V__" />
+    <script type="module" src="/app.js?v=__V__"></script>
   </head>
   <body>
     <!-- Phosphor Icons (MIT), inlined from @phosphor-icons/core. -->
@@ -33,10 +33,41 @@
       <symbol id="i-up" viewBox="0 0 256 256">
         <path d="M208.49,120.49a12,12,0,0,1-17,0L140,69V216a12,12,0,0,1-24,0V69L64.49,120.49a12,12,0,0,1-17-17l72-72a12,12,0,0,1,17,0l72,72A12,12,0,0,1,208.49,120.49Z" />
       </symbol>
+      <symbol id="i-back" viewBox="0 0 256 256">
+        <path d="M228,128a12,12,0,0,1-12,12H69l51.52,51.51a12,12,0,0,1-17,17l-72-72a12,12,0,0,1,0-17l72-72a12,12,0,0,1,17,17L69,116H216A12,12,0,0,1,228,128Z" />
+      </symbol>
+      <symbol id="i-puzzle" viewBox="0 0 256 256">
+        <path d="M222.41,155.16a12,12,0,0,0-11.56-.69A16,16,0,0,1,188,139,16.2,16.2,0,0,1,202.8,124a15.83,15.83,0,0,1,8,1.5A12,12,0,0,0,228,114.7V72a20,20,0,0,0-20-20H176a40.15,40.15,0,0,0-12.62-29.16,39.67,39.67,0,0,0-29.94-10.76,40.08,40.08,0,0,0-37.34,37C96,50.07,96,51,96,52H64A20,20,0,0,0,44,72v28a40.15,40.15,0,0,0-29.16,12.62A40,40,0,0,0,41.1,179.9a28.3,28.3,0,0,0,2.9.1v28a20,20,0,0,0,20,20H208a20,20,0,0,0,20-20V165.31A12,12,0,0,0,222.41,155.16ZM204,204H68V165.31a12,12,0,0,0-17.15-10.84A15.9,15.9,0,0,1,42.8,156,16.2,16.2,0,0,1,28,141.06a16,16,0,0,1,22.82-15.52A12,12,0,0,0,68,114.7V76h42.7a12,12,0,0,0,10.83-17.15A15.9,15.9,0,0,1,120,50.8,16.19,16.19,0,0,1,134.94,36a16,16,0,0,1,15.53,22.81A12,12,0,0,0,161.31,76H204v24c-1,0-1.93,0-2.9.11A40,40,0,0,0,204,180h0Z" />
+      </symbol>
     </svg>
 
-    <main class="landing" hidden>
+    <main class="home" hidden>
       <h1 class="sr-only">Juegos de Scratch de 4°</h1>
+      <ul class="grid projects" role="list" aria-label="Proyectos"></ul>
+      <div class="home-empty" hidden>
+        <span class="frame"><svg class="icon" aria-hidden="true"><use href="#i-puzzle" /></svg></span>
+        <p class="home-empty-text">Todavía no hay proyectos.</p>
+      </div>
+    </main>
+
+    <main class="missing" hidden>
+      <h1 class="block hat lost"><span aria-hidden="true">?</span><span class="sr-only">Proyecto no encontrado</span></h1>
+      <div class="say note">
+        <p class="say-text">No encontramos este proyecto.</p>
+      </div>
+      <a class="home-link" href="/">
+        <svg class="icon" aria-hidden="true"><use href="#i-back" /></svg>
+        Ver los proyectos
+      </a>
+    </main>
+
+    <main class="landing" hidden>
+      <div class="crumb">
+        <a class="back" href="/" aria-label="Ver todos los proyectos" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-back" /></svg>
+        </a>
+        <h1 class="crumb-title"></h1>
+      </div>
       <div class="hats" role="group" aria-label="Elegí tu grado">
         <button class="block hat pick" type="button" data-g="4N">4N</button>
         <button class="block hat pick" type="button" data-g="4F">4F</button>
@@ -45,6 +76,12 @@
     </main>
 
     <main class="board" hidden>
+      <div class="crumb">
+        <a class="back" href="/" aria-label="Ver todos los proyectos" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-back" /></svg>
+        </a>
+        <p class="crumb-title"></p>
+      </div>
       <header class="top">
         <div class="palette" role="group" aria-label="Cambiar de grado">
           <button class="chip" type="button" data-g="4N" aria-pressed="false">4N</button>

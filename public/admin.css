@@ -5,6 +5,7 @@
   --flash: rgb(15 189 140 / 0.16);
   --danger: #cc3333;
   --pip-ring: rgb(46 52 80 / 0.24);
+  --track-off: #858ea4;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -12,6 +13,7 @@
     --surface: #1c2130;
     --flash: rgb(15 189 140 / 0.2);
     --pip-ring: rgb(255 255 255 / 0.22);
+    --track-off: #6b738a;
   }
 }
 
@@ -92,10 +94,295 @@
 
 .bar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
-  padding-top: var(--cap);
+}
+
+.heading {
+  display: grid;
+  justify-items: start;
+  min-width: 0;
+}
+
+.heading .head {
+  max-width: 100%;
+  margin-top: var(--cap);
+}
+
+/* A long project name stays on one line inside its hat. */
+.head-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The way back to the projects, small like the crumb on the public pages. */
+.up {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-left: -8px;
+  padding: 0 12px 0 8px;
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-size: 16px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.up .icon {
+  width: 20px;
+  height: 20px;
+}
+
+@media (hover: hover) {
+  .up:hover {
+    background: var(--well);
+    color: var(--ink);
+  }
+}
+
+.bar .out {
+  margin-bottom: 2px;
+}
+
+/* ---------- Projects ---------- */
+
+.projects-view {
+  --slot-h: 44px;
+  margin-top: 30px;
+}
+
+.maker {
+  --s: 1.25;
+  flex-wrap: wrap;
+  gap: 10px;
+  max-width: 760px;
+  padding: 14px 12px 14px 16px;
+}
+
+.maker-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.maker-title {
+  flex: 1 1 240px;
+}
+
+/* A white slot that shows the path: "/" then the editable slug. */
+.slug-slot {
+  display: flex;
+  align-items: center;
+  flex: 1 1 200px;
+  min-width: 0;
+  height: var(--slot-h);
+  padding: 0 14px;
+  border: 2px solid var(--slot-edge, #858ea4);
+  border-radius: 999px;
+  background: #fff;
+  color: #575e75;
+  font-size: 18px;
+  cursor: text;
+}
+
+.slug-slot:focus-within {
+  outline: 3px solid #2e3450;
+  outline-offset: 3px;
+}
+
+.slug-slot input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0 0 2px;
+  border: 0;
+  background: none;
+  color: #2e3450;
+  font: inherit;
+  outline: none;
+}
+
+.slug-slot input::placeholder {
+  color: #575e75;
+  opacity: 1;
+}
+
+.slug-slash {
+  font-weight: 700;
+}
+
+.projects-view .sheet {
+  margin-top: 26px;
+}
+
+.row.prow {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: 'open switch acts';
+}
+
+.plink,
+.pedit {
+  grid-area: open;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.plink {
+  margin: -6px -8px;
+  padding: 6px 8px;
+  border-radius: 12px;
+}
+
+@media (hover: hover) {
+  .plink:hover {
+    background: var(--well);
+  }
+}
+
+.pedit {
+  align-items: start;
+}
+
+.pedit .info {
+  flex: 1;
+  gap: 8px;
+}
+
+.cover {
+  flex: none;
+}
+
+.cover.none {
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+}
+
+.cover.none .icon {
+  width: 24px;
+  height: 24px;
+}
+
+.prow .row-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 18px;
+}
+
+.ptitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.caret {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--ink-2);
+}
+
+.pmeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+.tally b {
+  color: var(--mark);
+}
+
+/* Listed on the home page: a labeled switch, on is teal like the admin blocks. */
+.switch {
+  grid-area: switch;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px 0 8px;
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-size: 15px;
+}
+
+.track {
+  position: relative;
+  flex: none;
+  width: 46px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--track-off);
+  transition: background-color 160ms ease;
+}
+
+.knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(20 24 40 / 0.3);
+  transition: translate 220ms var(--spring);
+}
+
+.switch[aria-checked='true'] {
+  color: var(--ink);
+}
+
+.switch[aria-checked='true'] .track {
+  background: #0b8e69;
+}
+
+.switch[aria-checked='true'] .knob {
+  translate: 18px 0;
+}
+
+@media (hover: hover) {
+  .switch:hover {
+    background: var(--well);
+  }
+}
+
+/* On wide screens the main action for a new project says what it does. */
+.act.copy {
+  display: inline-flex;
+  gap: 8px;
+  width: auto;
+  padding: 0 16px 0 12px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px var(--hair);
+}
+
+.act-label {
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .act.copy {
+    width: 44px;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .act-label {
+    display: none;
+  }
+}
+
+.field-slug {
+  flex: none;
+  border-color: #858ea4;
+  font-size: 16px;
 }
 
 .out {
@@ -421,8 +708,9 @@ button.pip:active > span {
   }
 }
 
-/* Two-tap delete: the first tap grows a red "¿Seguro?" over the edit button. */
-.sure {
+/* Pills grow out of a button over its neighbors: the red two-tap delete question,
+   and the teal "Copiado" after copying a link. */
+.pill {
   position: absolute;
   z-index: 1;
   right: 0;
@@ -432,7 +720,6 @@ button.pip:active > span {
   height: 40px;
   padding: 0 16px;
   border-radius: 999px;
-  background: var(--danger);
   color: #fff;
   font-size: 15px;
   font-weight: 700;
@@ -445,6 +732,23 @@ button.pip:active > span {
   transition:
     scale 220ms var(--spring),
     opacity 120ms ease;
+}
+
+.sure {
+  background: var(--danger);
+}
+
+.copied {
+  background: #06533e;
+}
+
+.copy.done .copied {
+  scale: 1;
+  opacity: 1;
+}
+
+.copy.done {
+  color: #06533e;
 }
 
 /* Time left before the confirm goes away. */
@@ -533,6 +837,33 @@ button.pip:active > span {
   justify-self: end;
 }
 
+/* Project rows have auto-sized action columns, so a bubble spans the whole row. */
+.prow > .say {
+  grid-column: 1 / -1;
+}
+
+/* Errors carry the stop sign; news (like a changed link) carries a calm note instead. */
+.say .hint {
+  display: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  color: #3373cc;
+}
+
+.say.calm .hint {
+  display: block;
+}
+
+.say.calm .stop {
+  display: none;
+}
+
+/* While a delete asks "¿Seguro?", the other actions of that row step aside. */
+.acts:has(.confirming) > :not(.confirming) {
+  visibility: hidden;
+}
+
 /* A field error sits right under the field it is about. */
 .info > .say {
   margin: 22px 0 4px;
@@ -611,5 +942,31 @@ button.pip:active > span {
 
   .filter {
     min-width: 60px;
+  }
+
+  .row.prow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'open open'
+      'switch acts';
+    row-gap: 8px;
+    padding-bottom: 10px;
+  }
+
+  .switch {
+    justify-self: start;
+    margin-left: -8px;
+  }
+
+  .maker {
+    padding: 12px;
+  }
+
+  .bar {
+    align-items: flex-start;
+  }
+
+  .bar .out {
+    margin-top: 0;
   }
 }
