@@ -1,5 +1,4 @@
 const GRADES = ['4N', '4F', '4S'];
-const STORAGE_KEY = 'grade';
 const NS = 'http://www.w3.org/2000/svg';
 
 const SPRING = 'cubic-bezier(.34, 1.56, .64, 1)';
@@ -40,6 +39,9 @@ const grid = games.querySelector('.grid');
 const live = document.getElementById('live');
 const favicon = document.querySelector('link[rel="icon"]');
 const themeColors = document.querySelectorAll('meta[name="theme-color"]');
+// The page chrome without a grade, to restore it when going back to the picker.
+const plainIcon = favicon.href;
+const plainThemes = [...themeColors].map((meta) => meta.content);
 
 const motionOk = matchMedia('(prefers-reduced-motion: no-preference)');
 const moving = () => motionOk.matches;
@@ -169,12 +171,6 @@ const POP_OFF = [
   { transform: 'translate(84px, -76px) rotate(16deg)', opacity: 0 },
 ];
 
-const SNAP = [
-  { transform: 'translate(22px, 34px) rotate(2deg)', opacity: 0, easing: 'cubic-bezier(.2, .9, .3, 1)' },
-  { offset: 0.6, transform: 'translate(0, 3px) rotate(0)', opacity: 1, easing: 'ease-out' },
-  { transform: 'none', opacity: 1 },
-];
-
 const RISE = [
   { transform: 'translateY(18px) scale(.96)', opacity: 0 },
   { transform: 'none', opacity: 1 },
@@ -273,11 +269,16 @@ function setGrade(next) {
   for (const chip of chips) chip.setAttribute('aria-pressed', String(chip.dataset.g === next));
   document.title = `${project.title} · ${next}`;
   paintChrome(next);
-  try {
-    localStorage.setItem(STORAGE_KEY, next);
-  } catch {
-    /* storage unavailable: the choice just will not persist */
-  }
+}
+
+function clearGrade() {
+  grade = null;
+  delete root.dataset.grade;
+  document.title = project.title;
+  favicon.href = plainIcon;
+  themeColors.forEach((meta, i) => {
+    meta.content = plainThemes[i];
+  });
 }
 
 function showLanding() {
@@ -289,44 +290,83 @@ function showLanding() {
   });
 }
 
-function showBoard(next) {
-  board.hidden = false;
-  setGrade(next);
-  if (moving()) {
-    introUntil = performance.now() + 680;
-    hat.animate(HAT_DROP, { duration: 600, delay: 60, fill: 'backwards' });
-    form.animate(SNAP, { duration: 420, delay: 400, fill: 'backwards' });
-    palette.animate(RISE, { duration: 360, delay: 220, easing: SETTLE, fill: 'backwards' });
-  }
-  load(next, { stagger: true });
-}
+/**
+ * The picker and the board swap inside one page. The grade lives only in the history
+ * entry's state, never in the URL: the teacher bookmarks the address bar, and every
+ * class that opens the bookmark has to pick its own grade.
+ */
+let swapping = false;
 
-let picked = false;
-
-function pick(event) {
-  // The landing is one-shot; ignore a second tap while it morphs away.
-  if (picked) return;
-  picked = true;
-  const next = event.currentTarget.dataset.g;
-  const enter = () => {
-    landing.hidden = true;
-    board.hidden = false;
-    setGrade(next);
-    hat.focus({ preventScroll: true });
-    load(next, { stagger: true });
-  };
+/** Morphs `from` into `to` (both carry the hat), or swaps at once when motion is off. */
+function swap(change, from, to) {
   if (!document.startViewTransition || !moving()) {
-    enter();
-    return;
+    change();
+    return Promise.resolve();
   }
-  // The chosen hat morphs into the board's hat.
-  const chosen = event.currentTarget;
-  chosen.style.viewTransitionName = 'hat';
-  introUntil = performance.now() + 560;
-  document.startViewTransition(enter).finished.finally(() => {
-    chosen.style.viewTransitionName = '';
+  swapping = true;
+  from.style.viewTransitionName = 'hat';
+  const transition = document.startViewTransition(() => {
+    from.style.viewTransitionName = '';
+    change();
+    to.style.viewTransitionName = 'hat';
+  });
+  return transition.finished.finally(() => {
+    to.style.viewTransitionName = '';
+    swapping = false;
   });
 }
+
+function enterBoard(next) {
+  const chosen = picks.find((pick) => pick.dataset.g === next);
+  introUntil = performance.now() + (moving() ? 560 : 0);
+  return swap(
+    () => {
+      landing.hidden = true;
+      board.hidden = false;
+      setGrade(next);
+      hat.focus({ preventScroll: true });
+      load(next, { stagger: true });
+    },
+    chosen,
+    hat,
+  );
+}
+
+function backToPicker() {
+  const chosen = picks.find((pick) => pick.dataset.g === grade) ?? picks[0];
+  loading?.abort();
+  return swap(
+    () => {
+      unsay();
+      board.hidden = true;
+      landing.hidden = false;
+      clearGrade();
+      chosen.focus({ preventScroll: true });
+    },
+    hat,
+    chosen,
+  );
+}
+
+function pick(event) {
+  // Ignore a second tap while the hat is still morphing.
+  if (swapping || landing.hidden) return;
+  const next = event.currentTarget.dataset.g;
+  history.pushState({ grade: next }, '');
+  enterBoard(next);
+}
+
+// Back from the board returns to the picker; forward goes to that board again.
+window.addEventListener('popstate', (event) => {
+  if (!project || swapping) return;
+  const next = event.state?.grade;
+  if (GRADES.includes(next)) {
+    if (!board.hidden) switchGrade(next, { remember: false });
+    else enterBoard(next);
+  } else if (!board.hidden) {
+    backToPicker();
+  }
+});
 
 function popHat(prev) {
   const ghost = hat.cloneNode(true);
@@ -343,7 +383,7 @@ function popHat(prev) {
     .finished.finally(() => ghost.remove());
 }
 
-function switchGrade(next) {
+function switchGrade(next, { remember = true } = {}) {
   if (next === grade) {
     // Tapping the current grade retries a list that failed to load.
     if (bubble.dataset.kind === 'load') load(grade);
@@ -353,6 +393,8 @@ function switchGrade(next) {
   const before = colorsOf(form);
   if (moving()) popHat(prev);
   setGrade(next);
+  // Replace, not push: back from any board still goes straight to the picker.
+  if (remember) history.replaceState({ grade: next }, '');
   unsay();
   if (moving()) {
     hatDrop?.cancel();
@@ -826,14 +868,9 @@ async function openProject(slug) {
     // Only a listed project leads back home, so kids in a class project stay in it.
     crumb.querySelector('.back').hidden = !project.listed;
   }
-  let stored = null;
-  try {
-    stored = localStorage.getItem(STORAGE_KEY);
-  } catch {
-    stored = null;
-  }
-  if (GRADES.includes(stored)) showBoard(stored);
-  else showLanding();
+  // Entering a project always starts at the picker, even when reloading a board.
+  if (history.state?.grade) history.replaceState(null, '');
+  showLanding();
 }
 
 for (const el of picks) {

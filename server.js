@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { inflateSync } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -66,6 +67,30 @@ const ERR_SLUG_SHAPE = 'La dirección solo puede tener letras sin tildes, númer
 const ERR_SLUG_EMPTY = 'Elegí una dirección con letras o números.';
 const ERR_SLUG_RESERVED = 'Esa dirección está reservada. Elegí otra.';
 const ERR_SLUG_TAKEN = 'Ya hay un proyecto con esa dirección.';
+
+// Scratch's default thumbnail (the cat alone on a white stage) as a 12x9 grid of mean RGB,
+// measured from two real default thumbnails. One line per grid row.
+const DEFAULT_THUMB = Buffer.from(
+  [
+  'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+  'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+  'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+  'ffffffffffffffffffffffffffffffeddcbeebdbbeffffffffffffffffffffffffffffff',
+  'fffffffffffffffffffffffffcfcfce0c99ed5cfc2fcfcfdffffffffffffffffffffffff',
+  'fffffffffffffffffffffffffdfdfce3c795ecdfc7ffffffffffffffffffffffffffffff',
+  'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+  'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+  'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+  ].join(''),
+  'hex',
+);
+// A thumbnail is the default when no grid cell differs from it by more than this (0-255).
+// Known defaults reach 2.1; the closest real thumbnail seen (a robot on white) is 28.
+const DEFAULT_THUMB_LIMIT = 10;
+const THUMB_TIMEOUT_MS = 10_000;
+const THUMB_RETRY_MS = 15 * 60 * 1000;
+const THUMB_RECHECK_MS = 12 * 60 * 60 * 1000;
+const MAX_THUMB_BYTES = 3 * 1024 * 1024;
 
 /** In-memory source of truth. */
 let games = [];
@@ -298,6 +323,11 @@ function publicGame({ id, title, author, name, grade, addedAt }) {
   return { id, title, author, name, grade, addedAt };
 }
 
+/** Admin answers also say how the thumbnail was classified. */
+function adminGame(game) {
+  return { ...publicGame(game), thumb: game.thumb ?? null };
+}
+
 const newestFirst = (a, b) => String(b.addedAt).localeCompare(String(a.addedAt));
 const newestProjectFirst = (a, b) => String(b.createdAt).localeCompare(String(a.createdAt));
 
@@ -305,9 +335,19 @@ const projectBySlug = (slug) => projects.find((project) => project.slug === slug
 const projectById = (id) => projects.find((project) => project.id === id);
 const gamesOf = (project) => games.filter((game) => game.project === project.id).sort(newestFirst);
 
-/** Ids of the newest games, one per Scratch project, for a cover mosaic. */
-function coverIds(list) {
-  return [...new Set(list.map((game) => game.id))].slice(0, 4);
+/**
+ * Ids for a cover mosaic, one per Scratch project: the newest games with a real
+ * thumbnail first, then Scratch's default cat only to fill what is left. Games not
+ * checked yet, or whose picture could not be read, count as real.
+ */
+function coverIds(newest) {
+  const ids = [];
+  const take = (game) => {
+    if (ids.length < 4 && !ids.includes(game.id)) ids.push(game.id);
+  };
+  for (const game of newest) if (game.thumb !== 'default') take(game);
+  for (const game of newest) if (game.thumb === 'default') take(game);
+  return ids;
 }
 
 function listGames(project, grade) {
@@ -418,6 +458,9 @@ async function handleCreate(req, res) {
       addedAt: new Date().toISOString(),
       project: owner.id,
     };
+    // The same Scratch project may already be classified in another project or grade.
+    const twin = games.find((entry) => entry.id === id && entry.thumb);
+    if (twin) Object.assign(game, { thumb: twin.thumb, thumbCheckedAt: twin.thumbCheckedAt });
     games.push(game);
     status = 201;
   }
@@ -428,6 +471,8 @@ async function handleCreate(req, res) {
     return sendJson(res, 500, { error: ERR_SAVE });
   }
 
+  // Sending a link again may mean a new thumbnail, so look at it either way.
+  queueThumb(id);
   return sendJson(res, status, { game: publicGame(game) });
 }
 
@@ -449,6 +494,210 @@ function handlePublicApi(req, res, url) {
   }
   if (match) return sendJson(res, 404, { error: ERR_NO_PROJECT });
   return sendJson(res, 404, { error: 'Not found' });
+}
+
+/* ---------- Thumbnails: Scratch's default cat or a real picture ---------- */
+
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+}
+
+/**
+ * Minimal PNG decoder: non-interlaced 8/16-bit gray, RGB, gray+alpha and RGBA, and
+ * 1/2/4/8-bit palette. Returns RGB composited over white (a Scratch stage is white),
+ * or null for anything else (Scratch also serves some old thumbnails as GIF or JPEG).
+ */
+function decodePng(buf) {
+  const magic = '89504e470d0a1a0a';
+  if (buf.length < 8 || buf.toString('hex', 0, 8) !== magic) return null;
+  let width = 0;
+  let height = 0;
+  let depth = 0;
+  let type = -1;
+  let interlace = 0;
+  let palette = null;
+  let alphas = null;
+  const idat = [];
+  for (let pos = 8; pos + 8 <= buf.length; ) {
+    const length = buf.readUInt32BE(pos);
+    const kind = buf.toString('latin1', pos + 4, pos + 8);
+    const data = buf.subarray(pos + 8, pos + 8 + length);
+    pos += 12 + length;
+    if (kind === 'IHDR' && data.length >= 13) {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      depth = data[8];
+      type = data[9];
+      interlace = data[12];
+    } else if (kind === 'PLTE') palette = data;
+    else if (kind === 'tRNS') alphas = data;
+    else if (kind === 'IDAT') idat.push(data);
+    else if (kind === 'IEND') break;
+  }
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[type];
+  if (!channels || !width || !height || width * height > 4_000_000 || interlace !== 0) return null;
+  if (type === 3 ? !palette || ![1, 2, 4, 8].includes(depth) : ![8, 16].includes(depth)) return null;
+
+  let raw;
+  try {
+    raw = inflateSync(Buffer.concat(idat));
+  } catch {
+    return null;
+  }
+  const bits = channels * depth;
+  const bpp = Math.max(1, bits >> 3);
+  const stride = Math.ceil((width * bits) / 8);
+  if (raw.length < (stride + 1) * height) return null;
+
+  const pixels = new Uint8Array(width * height * 3);
+  const step = depth === 16 ? 2 : 1;
+  let prev = new Uint8Array(stride);
+  let line = new Uint8Array(stride);
+  for (let y = 0; y < height; y++) {
+    const start = y * (stride + 1);
+    const filter = raw[start];
+    if (filter > 4) return null;
+    line.set(raw.subarray(start + 1, start + 1 + stride));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? line[i - bpp] : 0;
+      const b = prev[i];
+      const c = i >= bpp ? prev[i - bpp] : 0;
+      if (filter === 1) line[i] = (line[i] + a) & 255;
+      else if (filter === 2) line[i] = (line[i] + b) & 255;
+      else if (filter === 3) line[i] = (line[i] + ((a + b) >> 1)) & 255;
+      else if (filter === 4) line[i] = (line[i] + paeth(a, b, c)) & 255;
+    }
+    for (let x = 0; x < width; x++) {
+      let r;
+      let g;
+      let b;
+      let a = 255;
+      if (type === 3) {
+        const bit = x * depth;
+        const index = (line[bit >> 3] >> (8 - depth - (bit & 7))) & ((1 << depth) - 1);
+        r = palette[index * 3] ?? 0;
+        g = palette[index * 3 + 1] ?? 0;
+        b = palette[index * 3 + 2] ?? 0;
+        if (alphas && index < alphas.length) a = alphas[index];
+      } else {
+        const at = x * channels * step;
+        r = line[at];
+        g = type === 0 || type === 4 ? r : line[at + step];
+        b = type === 0 || type === 4 ? r : line[at + 2 * step];
+        if (type === 4) a = line[at + step];
+        if (type === 6) a = line[at + 3 * step];
+      }
+      const o = (y * width + x) * 3;
+      pixels[o] = (r * a + 255 * (255 - a)) / 255;
+      pixels[o + 1] = (g * a + 255 * (255 - a)) / 255;
+      pixels[o + 2] = (b * a + 255 * (255 - a)) / 255;
+    }
+    [prev, line] = [line, prev];
+  }
+  return { width, height, pixels };
+}
+
+/** The mean RGB of each cell of a 12x9 grid: a coarse fingerprint of the picture. */
+function thumbSignature({ width, height, pixels }) {
+  const out = new Float64Array(12 * 9 * 3);
+  for (let cy = 0; cy < 9; cy++) {
+    const y0 = Math.floor((cy * height) / 9);
+    const y1 = Math.floor(((cy + 1) * height) / 9);
+    for (let cx = 0; cx < 12; cx++) {
+      const x0 = Math.floor((cx * width) / 12);
+      const x1 = Math.floor(((cx + 1) * width) / 12);
+      const sum = [0, 0, 0];
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const o = (y * width + x) * 3;
+          sum[0] += pixels[o];
+          sum[1] += pixels[o + 1];
+          sum[2] += pixels[o + 2];
+        }
+      }
+      const n = Math.max(1, (y1 - y0) * (x1 - x0));
+      const cell = (cy * 12 + cx) * 3;
+      for (let k = 0; k < 3; k++) out[cell + k] = sum[k] / n;
+    }
+  }
+  return out;
+}
+
+/**
+ * 'default' or 'custom'; 'unknown' when the picture cannot be read or is too small to be
+ * a real thumbnail (Scratch answers missing ones with a 60x60 placeholder).
+ */
+function classifyThumb(buf) {
+  const image = decodePng(buf);
+  if (!image || image.width < 160 || image.height < 120) return 'unknown';
+  const signature = thumbSignature(image);
+  let worst = 0;
+  for (let cell = 0; cell < signature.length; cell += 3) {
+    let diff = 0;
+    for (let k = 0; k < 3; k++) diff += Math.abs(signature[cell + k] - DEFAULT_THUMB[cell + k]);
+    worst = Math.max(worst, diff / 3);
+  }
+  return worst <= DEFAULT_THUMB_LIMIT ? 'default' : 'custom';
+}
+
+/** Downloads and classifies one thumbnail. Returns null when it should be tried again later. */
+async function checkThumb(id) {
+  try {
+    const response = await fetch(`https://cdn2.scratch.mit.edu/get_image/project/${id}_480x360.png`, {
+      headers: { 'User-Agent': 'juegos-scratch/1.0' },
+      signal: AbortSignal.timeout(THUMB_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    if (Number(response.headers.get('content-length')) > MAX_THUMB_BYTES) return 'unknown';
+    const buf = Buffer.from(await response.arrayBuffer());
+    return buf.length > MAX_THUMB_BYTES ? 'unknown' : classifyThumb(buf);
+  } catch {
+    return null;
+  }
+}
+
+/** Scratch ids waiting for a look, one at a time in the background; requests never wait on it. */
+const thumbQueue = new Set();
+let thumbWorking = false;
+
+function queueThumb(id) {
+  thumbQueue.add(id);
+  if (!thumbWorking) void drainThumbs();
+}
+
+async function drainThumbs() {
+  thumbWorking = true;
+  while (thumbQueue.size) {
+    const [id] = thumbQueue;
+    thumbQueue.delete(id);
+    const verdict = await checkThumb(id);
+    if (!verdict) {
+      setTimeout(() => queueThumb(id), THUMB_RETRY_MS).unref();
+      continue;
+    }
+    const checkedAt = new Date().toISOString();
+    let touched = false;
+    for (const game of games) {
+      if (game.id !== id) continue;
+      game.thumb = verdict;
+      game.thumbCheckedAt = checkedAt;
+      touched = true;
+    }
+    if (touched) await persist().catch(() => {});
+  }
+  thumbWorking = false;
+}
+
+function startThumbChecks() {
+  for (const game of games) if (!game.thumb) queueThumb(game.id);
+  // A kid can save a real thumbnail later, so defaults get another look twice a day.
+  setInterval(() => {
+    for (const game of games) if (game.thumb === 'default') queueThumb(game.id);
+  }, THUMB_RECHECK_MS).unref();
 }
 
 /* ---------- Admin ---------- */
@@ -656,7 +905,7 @@ async function handleGameUpdate(req, res, project, grade, id) {
   } catch {
     return sendJson(res, 500, { error: ERR_SAVE });
   }
-  return sendJson(res, 200, { game: publicGame(game) });
+  return sendJson(res, 200, { game: adminGame(game) });
 }
 
 async function handleGameDelete(req, res, project, grade, id) {
@@ -711,7 +960,7 @@ async function handleAdmin(req, res, pathname) {
       const own = gamesOf(project);
       return sendJson(res, 200, {
         project: adminProject(project),
-        games: own.map(publicGame),
+        games: own.map(adminGame),
         counts: countByGrade(own),
       });
     }
@@ -844,6 +1093,7 @@ const server = createServer((req, res) => {
 await loadData();
 server.listen(PORT, HOST, () => {
   console.log(`juegos-scratch listening on http://${HOST}:${PORT}`);
+  startThumbChecks();
 });
 
 export { prettify, extractProjectId, slugify };

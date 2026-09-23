@@ -72,6 +72,10 @@ Each record looks like:
 }
 ```
 
+Games also carry server-only `thumb` (`default`, `custom` or `unknown`) and `thumbCheckedAt`:
+a background check tells Scratch's default thumbnail (the cat on a white stage) from a real
+one, so project covers show real pictures first. The public API never exposes them.
+
 A game is unique per `(project, grade, id)`, so the same Scratch project can appear in
 two projects. A project looks like
 `{ "id": "3f2a9c1b7d4e", "slug": "pong", "title": "Pong", "listed": true, "createdAt": "…" }`;
