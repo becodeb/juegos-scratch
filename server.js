@@ -14,7 +14,12 @@ const DATA_DIR = process.env.DATA_DIR || './data';
 const GAMES_FILE = path.join(DATA_DIR, 'games.json');
 const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
 
-const GRADES = ['4N', '4F', '4S'];
+// School years and the divisions inside each. A grade is year + letter: 3N, 4F...
+const YEARS = [3, 4];
+const DIVISIONS = ['N', 'F', 'S'];
+const gradesOf = (year) => DIVISIONS.map((letter) => `${year}${letter}`);
+// Projects saved before years existed were all 4th grade.
+const LEGACY_YEAR = 4;
 const MAX_BODY_BYTES = 4 * 1024;
 const MAX_LIST = 300;
 const MAX_TITLE = 120;
@@ -24,7 +29,9 @@ const SCRATCH_TIMEOUT_MS = 10000;
 
 const SLUG_SHAPE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 // Top-level paths the app uses itself, so no project can take them.
+// (Purely numeric slugs are reserved too: /3 and /4 are the year pages.)
 const RESERVED_SLUGS = new Set(['admin', 'api', 'fonts']);
+const isReservedSlug = (slug) => RESERVED_SLUGS.has(slug) || /^\d+$/.test(slug);
 // Games saved before projects existed land here, unlisted.
 const LEGACY_PROJECT = { slug: 'primeros-juegos', title: 'Primeros juegos' };
 
@@ -40,6 +47,7 @@ const CONTENT_TYPES = {
 
 const ERR_BAD_LINK = 'Ese link no es de un proyecto de Scratch.';
 const ERR_NO_GRADE = 'Elegí tu grado primero.';
+const ERR_WRONG_YEAR = 'Ese grado no es de este proyecto.';
 const ERR_NO_PROJECT = 'Ese proyecto no existe.';
 const ERR_NOT_SHARED =
   'Ese proyecto no está compartido. Tocá «Compartir» en Scratch y probá de nuevo.';
@@ -51,7 +59,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'gatoverde';
 const ADMIN_COOKIE = '__Host-admin';
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const ADMIN_PAGE_PATH = /^\/admin(?:\.html|\/(?:[^/.]+\/?)?)?$/;
-const ADMIN_PROJECT_PATH = /^\/api\/admin\/projects\/([\w-]{1,64})(?:\/games(?:\/(4[NFS])\/(\d{1,15}))?)?$/;
+const ADMIN_PROJECT_PATH = /^\/api\/admin\/projects\/([\w-]{1,64})(?:\/games(?:\/(\d[A-Z])\/(\d{1,15}))?)?$/;
 // Both derive from the password, so changing it signs every session out.
 const PASSWORD_DIGEST = createHash('sha256').update(ADMIN_PASSWORD).digest();
 const SESSION_KEY = createHash('sha256').update(`juegos-scratch admin session:${ADMIN_PASSWORD}`).digest();
@@ -60,7 +68,6 @@ const ERR_ADMIN_PASSWORD = 'Contraseña incorrecta.';
 const ERR_ADMIN_SESSION = 'Entrá de nuevo.';
 const ERR_ADMIN_GONE = 'Ese juego ya no está.';
 const ERR_ADMIN_PROJECT_GONE = 'Ese proyecto ya no está.';
-const ERR_ADMIN_GRADE = 'Ese grado no existe.';
 const ERR_ADMIN_NOTHING = 'No hay cambios.';
 const ERR_ADMIN_BAD = 'No se entendió el pedido.';
 const ERR_SLUG_SHAPE = 'La dirección solo puede tener letras sin tildes, números y guiones.';
@@ -166,8 +173,8 @@ function newProjectId() {
   return id;
 }
 
-function createProject(title, slug, listed) {
-  const project = { id: newProjectId(), slug, title, listed, createdAt: new Date().toISOString() };
+function createProject(title, slug, listed, year = LEGACY_YEAR) {
+  const project = { id: newProjectId(), slug, title, year, listed, createdAt: new Date().toISOString() };
   projects.push(project);
   return project;
 }
@@ -186,6 +193,11 @@ function freeSlug(base) {
  */
 function migrate() {
   let changed = false;
+  for (const project of projects) {
+    if (YEARS.includes(project.year)) continue;
+    project.year = LEGACY_YEAR;
+    changed = true;
+  }
   const loose = games.filter((game) => typeof game.project !== 'string' || !game.project);
   if (loose.length) {
     const legacy =
@@ -201,6 +213,7 @@ function migrate() {
       id: game.project,
       slug: freeSlug('recuperado'),
       title: 'Proyecto recuperado',
+      year: Number(game.grade?.[0]) === 3 ? 3 : LEGACY_YEAR,
       listed: false,
       createdAt: new Date().toISOString(),
     });
@@ -357,13 +370,14 @@ function listGames(project, grade) {
     .map(publicGame);
 }
 
-function listProjects() {
+/** Listed projects, newest first; only one school year when `year` is given. */
+function listProjects(year) {
   return projects
-    .filter((project) => project.listed)
+    .filter((project) => project.listed && (!year || project.year === year))
     .sort(newestProjectFirst)
     .map((project) => {
       const own = gamesOf(project);
-      return { slug: project.slug, title: project.title, count: own.length, recent: coverIds(own) };
+      return { slug: project.slug, title: project.title, year: project.year, count: own.length, recent: coverIds(own) };
     });
 }
 
@@ -422,10 +436,11 @@ async function handleCreate(req, res) {
   if (!id) return sendJson(res, 400, { error: ERR_BAD_LINK });
 
   const grade = typeof body?.grade === 'string' ? body.grade : '';
-  if (!GRADES.includes(grade)) return sendJson(res, 400, { error: ERR_NO_GRADE });
+  if (!grade) return sendJson(res, 400, { error: ERR_NO_GRADE });
 
   const owner = typeof body?.project === 'string' ? projectBySlug(body.project) : undefined;
   if (!owner) return sendJson(res, 404, { error: ERR_NO_PROJECT });
+  if (!gradesOf(owner.year).includes(grade)) return sendJson(res, 400, { error: ERR_WRONG_YEAR });
 
   const project = await fetchProject(id);
   if (!project.ok) {
@@ -480,17 +495,22 @@ function handlePublicApi(req, res, url) {
   const { pathname, searchParams } = url;
   if (pathname === '/api/games') {
     const grade = searchParams.get('grade') || '';
-    if (!GRADES.includes(grade)) return sendJson(res, 400, { error: ERR_NO_GRADE });
     const project = projectBySlug(searchParams.get('project') || '');
     if (!project) return sendJson(res, 404, { error: ERR_NO_PROJECT });
+    if (!gradesOf(project.year).includes(grade)) return sendJson(res, 400, { error: ERR_NO_GRADE });
     return sendJson(res, 200, { games: listGames(project, grade) });
   }
-  if (pathname === '/api/projects') return sendJson(res, 200, { projects: listProjects() });
+  if (pathname === '/api/projects') {
+    // ?year=3 or ?year=4 narrows the list; without it, every listed project.
+    const year = Number(searchParams.get('year'));
+    if (searchParams.has('year') && !YEARS.includes(year)) return sendJson(res, 400, { error: ERR_ADMIN_BAD });
+    return sendJson(res, 200, { projects: listProjects(YEARS.includes(year) ? year : null) });
+  }
   const match = /^\/api\/projects\/([^/]+)$/.exec(pathname);
   const project = match && projectBySlug(match[1]);
   if (project) {
-    const { slug, title, listed } = project;
-    return sendJson(res, 200, { project: { slug, title, listed } }, listed ? {} : { 'X-Robots-Tag': 'noindex' });
+    const { slug, title, year, listed } = project;
+    return sendJson(res, 200, { project: { slug, title, year, listed } }, listed ? {} : { 'X-Robots-Tag': 'noindex' });
   }
   if (match) return sendJson(res, 404, { error: ERR_NO_PROJECT });
   return sendJson(res, 404, { error: 'Not found' });
@@ -755,16 +775,26 @@ async function handleLogin(req, res) {
   return sendJson(res, 200, { ok: true });
 }
 
-function countByGrade(list) {
-  const counts = Object.fromEntries(GRADES.map((grade) => [grade, 0]));
+function countByGrade(list, year) {
+  const counts = Object.fromEntries(gradesOf(year).map((grade) => [grade, 0]));
   for (const game of list) if (game.grade in counts) counts[game.grade] += 1;
   return counts;
 }
 
 function adminProject(project) {
   const own = gamesOf(project);
-  const { id, slug, title, listed, createdAt } = project;
-  return { id, slug, title, listed, createdAt, counts: countByGrade(own), total: own.length, recent: coverIds(own) };
+  const { id, slug, title, year, listed, createdAt } = project;
+  return {
+    id,
+    slug,
+    title,
+    year,
+    listed,
+    createdAt,
+    counts: countByGrade(own, year),
+    total: own.length,
+    recent: coverIds(own),
+  };
 }
 
 /** Checks a slug a person typed. Returns an error message, or null when it can be used. */
@@ -772,7 +802,7 @@ function slugProblem(slug) {
   if (!slug) return ERR_SLUG_EMPTY;
   if (slug.length > MAX_SLUG) return `La dirección puede tener hasta ${MAX_SLUG} caracteres.`;
   if (!SLUG_SHAPE.test(slug)) return ERR_SLUG_SHAPE;
-  if (RESERVED_SLUGS.has(slug)) return ERR_SLUG_RESERVED;
+  if (isReservedSlug(slug)) return ERR_SLUG_RESERVED;
   return null;
 }
 
@@ -800,6 +830,10 @@ function readProjectChanges(body, self) {
     if (typeof body.listed !== 'boolean') return { status: 400, error: ERR_ADMIN_BAD };
     changes.listed = body.listed;
   }
+  if (body.year !== undefined) {
+    if (!YEARS.includes(body.year)) return { status: 400, error: 'Elegí 3° o 4°.' };
+    changes.year = body.year;
+  }
   return { changes };
 }
 
@@ -813,7 +847,8 @@ async function handleProjectCreate(req, res) {
   if (error) return sendJson(res, status, { error });
 
   // New projects start off the home page until the teacher lists them.
-  const project = createProject(changes.title, changes.slug, changes.listed ?? false);
+  if (changes.year === undefined) return sendJson(res, 400, { error: 'Elegí 3° o 4°.' });
+  const project = createProject(changes.title, changes.slug, changes.listed ?? false, changes.year);
   try {
     await persist();
   } catch {
@@ -829,7 +864,11 @@ async function handleProjectUpdate(req, res, project) {
   if (error) return sendJson(res, status, { error });
   if (Object.keys(changes).length === 0) return sendJson(res, 400, { error: ERR_ADMIN_NOTHING });
 
-  // Games point at the project id, so a new slug leaves them untouched.
+  // Games point at the project id, so a new slug leaves them untouched. A new year
+  // carries the games along: 4N becomes 3N, keeping each division.
+  if (changes.year !== undefined && changes.year !== project.year) {
+    for (const game of games) if (game.project === project.id) game.grade = `${changes.year}${game.grade.slice(1)}`;
+  }
   Object.assign(project, changes);
   try {
     await persist();
@@ -853,10 +892,10 @@ async function handleProjectDelete(req, res, project) {
 }
 
 /** Validates `{ grade?, title?, name? }`. Returns `{ changes }` or `{ error }`. */
-function readGameChanges(body) {
+function readGameChanges(body, project) {
   const changes = {};
   if (body.grade !== undefined) {
-    if (!GRADES.includes(body.grade)) return { error: ERR_ADMIN_GRADE };
+    if (!gradesOf(project.year).includes(body.grade)) return { error: ERR_WRONG_YEAR };
     changes.grade = body.grade;
   }
   for (const [field, label] of [
@@ -879,7 +918,7 @@ const findGame = (project, grade, id) =>
 async function handleGameUpdate(req, res, project, grade, id) {
   const body = await readJsonBody(req, res);
   if (!body) return;
-  const { changes, error } = readGameChanges(body);
+  const { changes, error } = readGameChanges(body, project);
   if (error) return sendJson(res, 400, { error });
 
   const game = findGame(project, grade, id);
@@ -961,7 +1000,7 @@ async function handleAdmin(req, res, pathname) {
       return sendJson(res, 200, {
         project: adminProject(project),
         games: own.map(adminGame),
-        counts: countByGrade(own),
+        counts: countByGrade(own, project.year),
       });
     }
   } else {
@@ -986,7 +1025,8 @@ async function sendPage(res, file, status, headers = {}) {
 }
 
 /**
- * `/` is the projects home and `/<slug>` a project; index.html reads the path.
+ * `/` picks the school year, `/3` and `/4` list that year's projects, and `/<slug>` is a
+ * project; index.html reads the path.
  * `/Pong` and `/pong/` redirect to `/pong`; unknown paths get the app's own 404.
  */
 function handleAppPage(res, url) {
@@ -1006,7 +1046,8 @@ function handleAppPage(res, url) {
     return undefined;
   }
 
-  const project = SLUG_SHAPE.test(slug) && !RESERVED_SLUGS.has(slug) ? projectBySlug(slug) : undefined;
+  if (YEARS.map(String).includes(slug)) return sendPage(res, 'index.html', 200);
+  const project = SLUG_SHAPE.test(slug) && !isReservedSlug(slug) ? projectBySlug(slug) : undefined;
   if (!project) return sendPage(res, 'index.html', 404, { 'X-Robots-Tag': 'noindex' });
   return sendPage(res, 'index.html', 200, project.listed ? {} : { 'X-Robots-Tag': 'noindex' });
 }

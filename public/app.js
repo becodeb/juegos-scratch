@@ -1,4 +1,6 @@
-const GRADES = ['4N', '4F', '4S'];
+// Divisions inside each school year; a grade is year + letter (3N, 4F...). Colors follow the letter.
+const DIVISIONS = ['N', 'F', 'S'];
+const YEARS = ['3', '4'];
 const NS = 'http://www.w3.org/2000/svg';
 
 const SPRING = 'cubic-bezier(.34, 1.56, .64, 1)';
@@ -12,13 +14,16 @@ const GRAVITY = 1700;
 const CONFETTI = ['#4c97ff', '#9966ff', '#cf63cf', '#ffab19', '#ffbf00', '#5cb1d6', '#59c059', '#ff8c1a', '#ff6680'];
 
 const root = document.documentElement;
+const years = document.querySelector('.years');
+const yearHats = [...years.querySelectorAll('.year-hat')];
 const home = document.querySelector('.home');
+const homeCrumb = home.querySelector('.crumb');
 const shelf = home.querySelector('.projects');
 const homeEmpty = home.querySelector('.home-empty');
 const missing = document.querySelector('.missing');
 const lostHat = missing.querySelector('.lost');
 const note = missing.querySelector('.note');
-const crumbs = [...document.querySelectorAll('.crumb')];
+const crumbs = [...document.querySelectorAll('.landing .crumb, .board .crumb')];
 const landing = document.querySelector('.landing');
 const picks = [...landing.querySelectorAll('.pick')];
 const board = document.querySelector('.board');
@@ -274,7 +279,7 @@ function setGrade(next) {
 function clearGrade() {
   grade = null;
   delete root.dataset.grade;
-  document.title = project.title;
+  document.title = `${project.title} · ${project.year}°`;
   favicon.href = plainIcon;
   themeColors.forEach((meta, i) => {
     meta.content = plainThemes[i];
@@ -283,7 +288,7 @@ function clearGrade() {
 
 function showLanding() {
   landing.hidden = false;
-  document.title = project.title;
+  document.title = `${project.title} · ${project.year}°`;
   if (!moving()) return;
   picks.forEach((pick, i) => {
     pick.animate(LAND, { duration: 780, delay: 120 + i * 120, fill: 'backwards' });
@@ -360,7 +365,7 @@ function pick(event) {
 window.addEventListener('popstate', (event) => {
   if (!project || swapping) return;
   const next = event.state?.grade;
-  if (GRADES.includes(next)) {
+  if (grades().includes(next)) {
     if (!board.hidden) switchGrade(next, { remember: false });
     else enterBoard(next);
   } else if (!board.hidden) {
@@ -793,8 +798,26 @@ function buildProject(entry) {
   return card;
 }
 
-async function showHome() {
+/** The grades of the open project: its year with each division letter. */
+const grades = () => DIVISIONS.map((letter) => `${project.year}${letter}`);
+
+/** `/` asks for the school year: two hats that lead to `/3` and `/4`. */
+function showYears() {
+  years.hidden = false;
+  document.title = 'Juegos de Scratch';
+  if (!moving()) return;
+  yearHats.forEach((hat, i) => {
+    hat.animate(LAND, { duration: 780, delay: 120 + i * 140, fill: 'backwards' });
+  });
+}
+
+/** `/3` and `/4`: that year's listed projects, with a quiet way back to the year picker. */
+async function showHome(year) {
   home.hidden = false;
+  document.title = `Juegos ${year}°`;
+  const label = homeCrumb.querySelector('.crumb-title');
+  label.textContent = `${year}°`;
+  label.prepend(Object.assign(document.createElement('span'), { className: 'sr-only', textContent: 'Proyectos de ' }));
   const skeleton = setTimeout(() => {
     shelf.replaceChildren(
       ...Array.from({ length: 3 }, () => {
@@ -808,7 +831,7 @@ async function showHome() {
   }, SKELETON_DELAY);
   let list = null;
   try {
-    const response = await fetch('/api/projects');
+    const response = await fetch(`/api/projects?year=${year}`);
     if (response.ok) list = (await response.json()).projects;
   } catch {
     list = null;
@@ -817,7 +840,9 @@ async function showHome() {
   if (!Array.isArray(list) || list.length === 0) {
     shelf.replaceChildren();
     homeEmpty.hidden = false;
-    if (!list) homeEmpty.querySelector('.home-empty-text').textContent = 'No se pudieron cargar los proyectos.';
+    homeEmpty.querySelector('.home-empty-text').textContent = list
+      ? `Todavía no hay proyectos de ${year}°.`
+      : 'No se pudieron cargar los proyectos.';
     return;
   }
   const cards = list.map(buildProject);
@@ -840,7 +865,7 @@ function showMissing(message) {
 
 /* ---------- Start ---------- */
 
-/** `/` is the home; `/pong` is the project with slug `pong` (the server already lowercases it). */
+/** `/` is the year picker, `/3` a year, `/pong` a project (the server already lowercases it). */
 function routeSlug() {
   const path = location.pathname.replace(/\/+$/, '');
   if (!path || path === '/index.html') return null;
@@ -865,9 +890,19 @@ async function openProject(slug) {
   project = (await response.json()).project;
   for (const crumb of crumbs) {
     crumb.querySelector('.crumb-title').textContent = project.title;
-    // Only a listed project leads back home, so kids in a class project stay in it.
-    crumb.querySelector('.back').hidden = !project.listed;
+    // Only a listed project leads back to its year, so kids in a class project stay in it.
+    const back = crumb.querySelector('.back');
+    back.hidden = !project.listed;
+    back.href = `/${project.year}`;
+    back.setAttribute('aria-label', `Ver los proyectos de ${project.year}°`);
   }
+  // The grade hats and the palette speak this project's year: 3N, 3F, 3S...
+  grades().forEach((grade, i) => {
+    picks[i].dataset.g = grade;
+    [...picks[i].childNodes].find((node) => node.nodeType === Node.TEXT_NODE).nodeValue = grade;
+    chips[i].dataset.g = grade;
+    chips[i].textContent = grade;
+  });
   // Entering a project always starts at the picker, even when reloading a board.
   if (history.state?.grade) history.replaceState(null, '');
   showLanding();
@@ -882,9 +917,11 @@ addShape(form, ['body']);
 addShape(bubble, ['body']);
 addShape(lostHat, ['body']);
 addShape(note, ['body']);
+for (const el of yearHats) addShape(el, ['ring', 'gap', 'body']);
 
 for (const chip of chips) chip.addEventListener('click', () => switchGrade(chip.dataset.g));
 
 const slug = routeSlug();
-if (slug === null) showHome();
+if (slug === null) showYears();
+else if (YEARS.includes(slug)) showHome(slug);
 else openProject(slug);

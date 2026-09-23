@@ -101,6 +101,10 @@
       <section class="projects-view" aria-label="Proyectos" hidden>
         <form class="block cmd tool maker" novalidate>
           <svg class="icon maker-icon" aria-hidden="true"><use href="#i-plus" /></svg>
+          <div class="yearpick" role="group" aria-label="Año del proyecto nuevo">
+            <button class="ybtn" type="button" data-y="3" aria-pressed="false">3°</button>
+            <button class="ybtn" type="button" data-y="4" aria-pressed="true">4°</button>
+          </div>
           <input
             class="slot maker-title"
             type="text"
@@ -124,6 +128,12 @@
           </label>
           <button class="enter" type="submit">Crear</button>
         </form>
+
+        <div class="yfilter" role="group" aria-label="Mostrar proyectos de">
+          <button class="yf" type="button" data-y="all" aria-pressed="true">Todos</button>
+          <button class="yf" type="button" data-y="3" aria-pressed="false">3°</button>
+          <button class="yf" type="button" data-y="4" aria-pressed="false">4°</button>
+        </div>
 
         <section class="sheet" aria-busy="false">
           <ul class="rows plist" role="list"></ul>

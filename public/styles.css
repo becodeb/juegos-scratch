@@ -68,22 +68,23 @@
   --dot: #d2d8e4;
 }
 
-html[data-grade='4N'] {
+html[data-grade$='N'] {
   --paper: #edf3fd;
   --dot: #c8d7f0;
 }
-html[data-grade='4F'] {
+html[data-grade$='F'] {
   --paper: #f3f0fd;
   --dot: #d9cff3;
 }
-html[data-grade='4S'] {
+html[data-grade$='S'] {
   --paper: #fcf3e6;
   --dot: #edd9bc;
 }
 
-/* Grade block tokens (Scratch 3 category colors). 4N is nudged darker so white labels reach 3:1;
-   4S gets brown ink and a darker slot border because white fails on orange. */
-[data-g='4N'] {
+/* Division tokens (Scratch 3 category colors), matched by the grade's last letter so 3N and 4N
+   share them. N is nudged darker so white labels reach 3:1;
+   S gets brown ink and a darker slot border because white fails on orange. */
+[data-g$='N'] {
   --fill: #4592fb;
   --edge: #3373cc;
   --deep: #3373cc;
@@ -92,7 +93,7 @@ html[data-grade='4S'] {
   --slot-edge: #3373cc;
   --mark: #3373cc;
 }
-[data-g='4F'] {
+[data-g$='F'] {
   --fill: #9966ff;
   --edge: #774dcb;
   --deep: #774dcb;
@@ -101,7 +102,7 @@ html[data-grade='4S'] {
   --slot-edge: #774dcb;
   --mark: #774dcb;
 }
-[data-g='4S'] {
+[data-g$='S'] {
   --fill: #ffab19;
   --edge: #cf8b17;
   --deep: #cf8b17;
@@ -125,25 +126,25 @@ html[data-grade='4S'] {
     --paper: #161a26;
     --dot: #3c445b;
   }
-  html[data-grade='4N'] {
+  html[data-grade$='N'] {
     --paper: #111b2f;
     --dot: #32446d;
   }
-  html[data-grade='4F'] {
+  html[data-grade$='F'] {
     --paper: #19152f;
     --dot: #433b75;
   }
-  html[data-grade='4S'] {
+  html[data-grade$='S'] {
     --paper: #201b1e;
     --dot: #504240;
   }
-  [data-g='4N'] {
+  [data-g$='N'] {
     --mark: #8db8ff;
   }
-  [data-g='4F'] {
+  [data-g$='F'] {
     --mark: #bca3ff;
   }
-  [data-g='4S'] {
+  [data-g$='S'] {
     --mark: #f5b550;
   }
 }
@@ -227,7 +228,8 @@ button {
 
 /* Blocks: the outline is an SVG path drawn by app.js behind the content. */
 .board,
-.landing {
+.landing,
+.years {
   --cap: calc(17px * var(--s));
 }
 
@@ -268,8 +270,21 @@ button {
   transform-origin: 50% 100%;
 }
 
+/* School years: colors that never meet a division (N blue, F purple, S orange). */
+[data-y='3'] {
+  --fill: #59c059;
+  --edge: #389438;
+  --on: #10341a;
+}
+[data-y='4'] {
+  --fill: #ff6680;
+  --edge: #ff3355;
+  --on: #4a0b1c;
+}
+
 /* Landing: three giant hat blocks dropped on the canvas. */
-.landing {
+.landing,
+.years {
   position: relative;
   --s: 3.2;
   min-height: 100dvh;
@@ -283,6 +298,15 @@ button {
   grid-template-columns: repeat(3, auto);
   column-gap: calc(16px * var(--s));
   align-items: start;
+}
+
+/* The year picker: two hats, each a link to its year's projects. */
+.years .hats {
+  grid-template-columns: repeat(2, auto);
+}
+
+.year-hat {
+  text-decoration: none;
 }
 
 /* The label is the block: its ink is about half the 120u width, centered in a taller body. */
@@ -926,6 +950,10 @@ button {
   margin-bottom: 6px;
 }
 
+.home > .crumb {
+  margin: -24px 0 28px;
+}
+
 /* ---------- Home: every listed project as a big mosaic of its newest games ---------- */
 
 .home {
@@ -1117,8 +1145,15 @@ button {
 
 /* Tablet and phone: the hats keep their block width and stack on a diagonal. */
 @media (max-width: 999px) {
-  .landing {
+  .landing,
+  .years {
     --s: 2.4;
+  }
+  .years .hats {
+    grid-template-columns: 1fr;
+  }
+  .years .pick:nth-child(2) {
+    justify-self: end;
   }
   .hats {
     grid-template-columns: 1fr;
@@ -1138,13 +1173,15 @@ button {
 }
 
 @media (max-width: 399px) {
-  .landing {
+  .landing,
+  .years {
     --s: 2.2;
   }
 }
 
 @media (max-width: 359px) {
-  .landing {
+  .landing,
+  .years {
     --s: 2;
   }
 }

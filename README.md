@@ -4,10 +4,11 @@ A classroom board where 4th-grade students paste a link to their Scratch project
 and see their classmates' games. Three grades: `4N`, `4F`, `4S`. No login — the
 grade the visitor picks filters the list and is attached to whatever they submit.
 
-Games belong to a **project** (a class assignment such as "Pong"). Each project has
-its own page at `/<slug>` (for example `/pong`), where students pick their grade.
-The home page `/` shows only the projects the teacher lists there; unlisted ones
-still work by URL and are marked `noindex`.
+Games belong to a **project** (a class assignment such as "Pong"), and every project
+belongs to a school year, 3° or 4°. `/` asks for the year; `/3` and `/4` show that
+year's listed projects. Each project has its own page at `/<slug>` (for example
+`/pong`), where students pick their grade: the year plus a division letter (3N, 4F...).
+Unlisted projects still work by URL and are marked `noindex`. Numeric slugs are reserved.
 
 When a link is submitted, the server extracts the Scratch project id, asks the
 public Scratch API for the project's title and author, and stores the result.
@@ -78,12 +79,12 @@ one, so project covers show real pictures first. The public API never exposes th
 
 A game is unique per `(project, grade, id)`, so the same Scratch project can appear in
 two projects. A project looks like
-`{ "id": "3f2a9c1b7d4e", "slug": "pong", "title": "Pong", "listed": true, "createdAt": "…" }`;
+`{ "id": "3f2a9c1b7d4e", "slug": "pong", "title": "Pong", "year": 4, "listed": true, "createdAt": "…" }`;
 games point at its `id`, so changing a slug never touches them.
 
 At boot, any game without a `project` (data from before projects existed) is moved into
 an unlisted project "Primeros juegos" at `/primeros-juegos`; nothing else in the game
-changes. A file that cannot be parsed is renamed to `*.broken-<time>` instead of being
+changes. Projects saved without a year get year 4. A file that cannot be parsed is renamed to `*.broken-<time>` instead of being
 overwritten.
 
 `name` is derived from the Scratch username, which at this school follows the

@@ -970,3 +970,87 @@ button.pip:active > span {
     margin-top: 0;
   }
 }
+
+/* ---------- School years ---------- */
+
+/* 3° / 4° buttons: one pressed at a time, the pressed one wears its year's color. */
+.yearpick {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #858ea4;
+}
+
+.maker .yearpick {
+  box-shadow: inset 0 0 0 2px var(--slot-edge);
+}
+
+.ybtn {
+  min-width: 44px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: #575e75;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.ybtn[data-y='3'][aria-pressed='true'],
+.ybtn[data-y='4'][aria-pressed='true'] {
+  background: var(--fill);
+  color: var(--on);
+  box-shadow: inset 0 0 0 2px var(--edge);
+}
+
+.ybtn:focus-visible {
+  outline-color: #2e3450;
+}
+
+.pedit .yearpick {
+  justify-self: start;
+}
+
+/* Year filter over the projects list. */
+.yfilter {
+  display: flex;
+  gap: 6px;
+  margin-top: 22px;
+}
+
+.yf {
+  min-width: 56px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px var(--hair);
+  color: var(--ink-2);
+  font-size: 16px;
+}
+
+.yf[aria-pressed='true'] {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--paper);
+  font-weight: 700;
+}
+
+.projects-view .yfilter + .sheet {
+  margin-top: 14px;
+}
+
+/* The year of each project, in its color. */
+.ychip {
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--on);
+  font-size: 13px;
+  font-weight: 700;
+}

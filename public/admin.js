@@ -1,4 +1,7 @@
-const GRADES = ['4N', '4F', '4S'];
+// Divisions inside each school year; a grade is year + letter (3N, 4F...). Colors follow the letter.
+const DIVISIONS = ['N', 'F', 'S'];
+const YEARS = [3, 4];
+const gradesOf = (year) => DIVISIONS.map((letter) => `${year}${letter}`);
 const NS = 'http://www.w3.org/2000/svg';
 const SPRING = 'cubic-bezier(.34, 1.56, .64, 1)';
 const SETTLE = 'cubic-bezier(.2, .7, .4, 1)';
@@ -30,6 +33,8 @@ const projectsView = panel.querySelector('.projects-view');
 const maker = projectsView.querySelector('.maker');
 const makerTitle = maker.querySelector('.maker-title');
 const makerSlug = maker.querySelector('.maker-slug');
+const makerYears = [...maker.querySelectorAll('.ybtn')];
+const yearFilters = [...projectsView.querySelectorAll('.yf')];
 const plist = projectsView.querySelector('.plist');
 const pnothing = projectsView.querySelector('.nothing');
 
@@ -54,6 +59,8 @@ let projects = [];
 let current = null;
 let games = [];
 let filter = 'all';
+/** Which school year the projects list shows: 'all', 3 or 4. */
+let yearFilter = 'all';
 
 /* ---------- Scratch shapes (same geometry as app.js) ---------- */
 
@@ -532,8 +539,11 @@ function buildProjectRow(project) {
   const title = el('span', 'row-title');
   title.append(el('span', 'ptitle', project.title), icon('i-caret', 'icon caret'));
   const meta = el('span', 'row-meta pmeta');
-  meta.append(el('span', 'slug', `/${project.slug}`));
-  for (const grade of GRADES) {
+  const chip = el('span', 'ychip', `${project.year}°`);
+  chip.dataset.y = project.year;
+  chip.prepend(el('span', 'sr-only', 'Año '));
+  meta.append(chip, ' ', el('span', 'slug', `/${project.slug}`));
+  for (const grade of Object.keys(project.counts)) {
     const tally = el('span', 'tally');
     tally.dataset.g = grade;
     tally.append(el('b', '', grade), ` ${project.counts[grade]}`);
@@ -575,11 +585,53 @@ function showProjects({ focusRow = null } = {}) {
   headLabel.textContent = 'Panel';
   upLink.hidden = true;
   showView(projectsView);
-  const items = projects.map(buildProjectRow);
+  const shown = projects.filter((project) => yearFilter === 'all' || project.year === yearFilter);
+  const items = shown.map(buildProjectRow);
   plist.replaceChildren(...items);
   pnothing.hidden = items.length > 0;
+  pnothing.querySelector('.nothing-text').textContent =
+    yearFilter === 'all' ? 'Todavía no hay proyectos.' : `No hay proyectos de ${yearFilter}°.`;
   rise(items);
   if (focusRow) plist.querySelector(`.row[data-id="${CSS.escape(focusRow)}"] .plink`)?.focus();
+}
+
+/** A pair of 3° / 4° buttons that works like a radio group. */
+function yearPicker(selected, label) {
+  const group = el('div', 'yearpick');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', label);
+  for (const year of YEARS) {
+    const button = el('button', 'ybtn', `${year}°`);
+    button.type = 'button';
+    button.dataset.y = year;
+    button.setAttribute('aria-pressed', String(year === selected));
+    group.append(button);
+  }
+  return group;
+}
+
+const pickedYear = (scope) => Number(scope.querySelector('.ybtn[aria-pressed="true"]')?.dataset.y);
+
+// Year buttons anywhere in the panel: pressing one releases its siblings.
+panel.addEventListener('click', (event) => {
+  const button = event.target.closest('.ybtn');
+  if (!button) return;
+  for (const other of button.parentElement.querySelectorAll('.ybtn')) {
+    other.setAttribute('aria-pressed', String(other === button));
+  }
+});
+
+for (const button of yearFilters) {
+  button.addEventListener('click', () => {
+    const next = button.dataset.y === 'all' ? 'all' : Number(button.dataset.y);
+    if (next === yearFilter) return;
+    yearFilter = next;
+    for (const other of yearFilters) other.setAttribute('aria-pressed', String(other === button));
+    // A new project follows the year being looked at.
+    if (next !== 'all') for (const b of makerYears) b.setAttribute('aria-pressed', String(Number(b.dataset.y) === next));
+    unsay();
+    showProjects();
+  });
 }
 
 let slugTouched = false;
@@ -621,7 +673,8 @@ maker.addEventListener('submit', async (event) => {
   }
 
   maker.busy = true;
-  const { status, data } = await api('POST', '/api/admin/projects', { title, slug });
+  const year = pickedYear(maker);
+  const { status, data } = await api('POST', '/api/admin/projects', { title, slug, year });
   maker.busy = false;
   if (status === 401) return expired();
   if (status !== 201) {
@@ -634,12 +687,16 @@ maker.addEventListener('submit', async (event) => {
   makerSlug.value = '';
   slugTouched = false;
   projects.unshift(data.project);
+  // A project of the other year would be hidden by the filter, so show it.
+  if (yearFilter !== 'all' && data.project.year !== yearFilter) yearFilters[0].click();
+  // (Switching the filter already drew it; draw it once, on top, with the entrance below.)
+  plist.querySelector(`.row[data-id="${CSS.escape(data.project.id)}"]`)?.remove();
   const row = buildProjectRow(data.project);
   flip(plist, () => plist.prepend(row));
   pnothing.hidden = true;
   if (moving()) row.animate(POP, { duration: 320, easing: SPRING });
   flash(row);
-  announce(`Creaste «${data.project.title}». Su link es ${location.origin}/${data.project.slug}.`);
+  announce(`Creaste «${data.project.title}» para ${data.project.year}°. Su link es ${location.origin}/${data.project.slug}.`);
   // The next thing a teacher does is copy the link for the bookmarks bar.
   row.querySelector('.copy').focus();
 });
@@ -733,7 +790,7 @@ function startProjectEdit(row) {
   const slug = slugField(project.slug);
   const box = el('div', 'pedit');
   const fields = el('div', 'info');
-  fields.append(title, slug);
+  fields.append(title, slug, yearPicker(project.year, 'Año del proyecto'));
   box.append(coverOf(project), fields);
   flip(plist, () => {
     row.classList.add('editing');
@@ -777,8 +834,10 @@ async function saveProjectEdit(row) {
   }
 
   const changes = {};
+  const year = pickedYear(row);
   if (title !== project.title) changes.title = title;
   if (slug !== project.slug) changes.slug = slug;
+  if (year && year !== project.year) changes.year = year;
   if (Object.keys(changes).length === 0) {
     endProjectEdit(row, project);
     return;
@@ -795,7 +854,11 @@ async function saveProjectEdit(row) {
   }
   Object.assign(project, data.project);
   const fresh = endProjectEdit(row, project, { saved: true });
-  if (changes.slug) {
+  if (changes.year && project.total) {
+    say(`Ahora es de ${project.year}°: sus juegos pasaron a ${gradesOf(project.year).join(', ')}.`, fresh, fresh.querySelector('.ychip'), {
+      info: true,
+    });
+  } else if (changes.slug) {
     // Old bookmarks now land on the not-found page, so say it plainly.
     say(`El link ahora es /${project.slug}. Copialo de nuevo para los marcadores.`, fresh, fresh.querySelector('.copy'), {
       info: true,
@@ -909,7 +972,7 @@ function buildGameRow(game) {
   const mover = el('div', 'mover');
   mover.setAttribute('role', 'group');
   mover.setAttribute('aria-label', 'Grado');
-  for (const grade of GRADES) mover.append(grade === game.grade ? currentPip(grade) : moveButton(grade, game));
+  for (const grade of gradesOf(current.year)) mover.append(grade === game.grade ? currentPip(grade) : moveButton(grade, game));
 
   const acts = el('div', 'acts');
   const del = actButton('del', 'i-trash', `Borrar «${game.title}»`);
@@ -924,7 +987,7 @@ function buildGameRow(game) {
 
 function updateCounts({ pop = false } = {}) {
   const counts = { all: games.length };
-  for (const grade of GRADES) counts[grade] = games.filter((game) => game.grade === grade).length;
+  for (const grade of gradesOf(current.year)) counts[grade] = games.filter((game) => game.grade === grade).length;
   for (const button of filterButtons) {
     const count = button.querySelector('.count');
     const next = String(counts[button.dataset.f]);
@@ -959,6 +1022,13 @@ function setFilter(next) {
 async function openGames(project, ticket) {
   current = project;
   games = [];
+  // The filters speak this project's year: 3N, 3F, 3S...
+  gradesOf(project.year).forEach((grade, i) => {
+    const button = filterButtons[i + 1];
+    button.dataset.f = grade;
+    button.querySelector('.label').textContent = grade;
+    button.querySelector('.dot').dataset.g = grade;
+  });
   setFilter('all');
   document.title = `${project.title} · Panel`;
   headLabel.textContent = project.title;

@@ -41,8 +41,21 @@
       </symbol>
     </svg>
 
+    <main class="years" hidden>
+      <h1 class="sr-only">Juegos de Scratch</h1>
+      <nav class="hats" aria-label="Elegí tu año">
+        <a class="block hat pick year-hat" href="/3" data-y="3"><span aria-hidden="true">3°</span><span class="sr-only">Tercer grado</span></a>
+        <a class="block hat pick year-hat" href="/4" data-y="4"><span aria-hidden="true">4°</span><span class="sr-only">Cuarto grado</span></a>
+      </nav>
+    </main>
+
     <main class="home" hidden>
-      <h1 class="sr-only">Juegos de Scratch de 4°</h1>
+      <div class="crumb">
+        <a class="back" href="/" aria-label="Elegir otro año">
+          <svg class="icon" aria-hidden="true"><use href="#i-back" /></svg>
+        </a>
+        <h1 class="crumb-title"></h1>
+      </div>
       <ul class="grid projects" role="list" aria-label="Proyectos"></ul>
       <div class="home-empty" hidden>
         <span class="frame"><svg class="icon" aria-hidden="true"><use href="#i-puzzle" /></svg></span>
