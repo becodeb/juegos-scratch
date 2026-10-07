@@ -533,8 +533,37 @@ button {
 }
 
 .slot:focus-visible,
+.paste:focus-visible,
 .go:focus-visible {
   outline-color: #2e3450;
+}
+
+/* Reads the clipboard into the slot, so kids do not need Ctrl+V. */
+.paste {
+  flex: none;
+  height: var(--slot-h);
+  padding: 0 calc(14px * var(--s));
+  border-radius: 999px;
+  background: var(--deep);
+  color: var(--on-deep);
+  font-size: calc(16px * var(--s));
+  transition: scale 160ms var(--spring);
+}
+
+@media (hover: hover) {
+  .paste:hover {
+    scale: 1.06;
+  }
+}
+
+.paste:active {
+  scale: 0.9;
+}
+
+/* A link dragged over the board lights up the add block where it will land. */
+.dropping .add {
+  outline: 3px dashed var(--on);
+  outline-offset: 4px;
 }
 
 .go {
@@ -1237,6 +1266,10 @@ button {
   }
   .slot {
     font-size: 16px;
+  }
+  /* Pasting or dropping adds on its own; the + only crowds the slot on a phone. */
+  .go {
+    display: none;
   }
   .grid {
     grid-template-columns: minmax(0, 1fr);

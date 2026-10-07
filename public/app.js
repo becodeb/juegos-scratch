@@ -37,6 +37,7 @@ const lead = form.querySelector('.lead');
 const peek = form.querySelector('.peek');
 const input = form.querySelector('.slot');
 const submit = form.querySelector('.go');
+const paste = form.querySelector('.paste');
 const bubble = board.querySelector('.say');
 const bubbleText = bubble.querySelector('.say-text');
 const games = board.querySelector('.games');
@@ -518,11 +519,14 @@ async function load(g, { stagger = false, quiet = false } = {}) {
     const data = await response.json();
     if (request.signal.aborted) return;
     clearTimeout(skeletonTimer);
-    render(Array.isArray(data.games) ? data.games : [], stagger);
+    const list = Array.isArray(data.games) ? data.games : [];
+    shown = signature(list);
+    render(list, stagger);
     if (bubble.dataset.kind === 'load') unsay();
   } catch {
     if (request.signal.aborted) return;
     clearTimeout(skeletonTimer);
+    shown = '';
     grid.replaceChildren();
     say('No se pudieron cargar los juegos.', 'load');
   } finally {
@@ -533,6 +537,43 @@ async function load(g, { stagger = false, quiet = false } = {}) {
     }
   }
 }
+
+/* ---------- Live refresh ---------- */
+
+// Classmates keep adding games during the class: poll so nobody has to reload the page.
+const REFRESH_EVERY = 10_000;
+let shown = '';
+
+const signature = (list) => JSON.stringify(list.map((game) => [game.id, game.title, game.name]));
+
+/** Re-reads the open board in the background and redraws it only when something changed. */
+async function refresh() {
+  if (document.hidden || board.hidden || !grade || loading || busy || swapping) return;
+  const g = grade;
+  let list = null;
+  try {
+    const query = `project=${encodeURIComponent(project.slug)}&grade=${encodeURIComponent(g)}`;
+    const response = await fetch(`/api/games?${query}`);
+    if (response.ok) list = (await response.json()).games;
+  } catch {
+    list = null;
+  }
+  // A failed poll stays silent; the next tick tries again.
+  if (!Array.isArray(list) || grade !== g || loading || busy) return;
+  const next = signature(list);
+  if (next === shown) return;
+  const before = new Set([...grid.querySelectorAll('.card[data-id]')].map((card) => card.dataset.id));
+  shown = next;
+  render(list, false);
+  if (bubble.dataset.kind === 'load') unsay();
+  if (!moving()) return;
+  for (const card of grid.querySelectorAll('.card[data-id]')) {
+    if (!before.has(card.dataset.id)) card.animate(RISE, { duration: 380, easing: SPRING, fill: 'backwards' });
+  }
+}
+
+setInterval(refresh, REFRESH_EVERY);
+document.addEventListener('visibilitychange', refresh);
 
 /* ---------- Feedback ---------- */
 
@@ -688,14 +729,95 @@ peek.addEventListener('error', hidePeek);
 
 let busy = false;
 
-input.addEventListener('input', () => {
+const TYPED_URL = /scratch\.mit\.edu\/projects\/\d/i;
+let autoTimer = 0;
+
+/** Adds the game as soon as the slot holds a project link, without waiting for the + button. */
+function autoAdd({ now = false } = {}) {
+  clearTimeout(autoTimer);
+  if (!extractProjectId(input.value)) return;
+  // A typed link waits for a pause, so it does not go out with half the number.
+  if (now) form.requestSubmit();
+  else if (TYPED_URL.test(input.value)) autoTimer = setTimeout(() => form.requestSubmit(), 1200);
+}
+
+input.addEventListener('input', (event) => {
   unsay();
   clearTimeout(peekTimer);
   peekTimer = setTimeout(() => showPeek(extractProjectId(input.value)), 200);
+  autoAdd({ now: event.inputType === 'insertFromPaste' || event.inputType === 'insertFromDrop' });
+});
+
+/** Puts `text` in the slot as if the kid had pasted it there. */
+function fill(text) {
+  if (busy) return;
+  input.value = text.trim();
+  clearTimeout(peekTimer);
+  showPeek(extractProjectId(input.value));
+  unsay();
+  if (extractProjectId(input.value)) {
+    autoAdd({ now: true });
+  } else {
+    shake();
+    say('Eso no es el link de un proyecto de Scratch.', 'add');
+  }
+}
+
+paste.addEventListener('click', async () => {
+  let text = '';
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    // No clipboard access (old browser or permission denied): fall back to Ctrl+V.
+    input.focus();
+    say('Tocá el casillero y apretá Ctrl+V.', 'add');
+    return;
+  }
+  if (!text.trim()) {
+    input.focus();
+    say('No hay nada copiado. Copiá el link de tu juego.', 'add');
+    return;
+  }
+  fill(text);
+});
+
+/* ---------- Drag a link from another tab ---------- */
+
+const droppable = (event) =>
+  !board.hidden && !!grade && [...event.dataTransfer.types].some((type) => type === 'text/uri-list' || type === 'text/plain');
+
+let dragDepth = 0;
+
+document.addEventListener('dragenter', (event) => {
+  if (!droppable(event)) return;
+  dragDepth += 1;
+  root.classList.add('dropping');
+});
+
+document.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) root.classList.remove('dropping');
+});
+
+document.addEventListener('dragover', (event) => {
+  if (!droppable(event)) return;
+  // Without this the browser would open the dropped link and leave the board.
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+});
+
+document.addEventListener('drop', (event) => {
+  dragDepth = 0;
+  root.classList.remove('dropping');
+  if (!droppable(event)) return;
+  event.preventDefault();
+  const uris = event.dataTransfer.getData('text/uri-list').split(/\r?\n/).filter((line) => line && !line.startsWith('#'));
+  fill(uris[0] || event.dataTransfer.getData('text/plain'));
 });
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
+  clearTimeout(autoTimer);
   if (busy || !grade) return;
 
   const url = input.value.trim();
@@ -845,6 +967,11 @@ async function showHome(year) {
       : 'No se pudieron cargar los proyectos.';
     return;
   }
+  // Nothing to choose from: open the only project, and keep back pointing at the year picker.
+  if (list.length === 1) {
+    location.replace(`/${list[0].slug}`);
+    return;
+  }
   const cards = list.map(buildProject);
   shelf.replaceChildren(...cards);
   if (!moving()) return;
@@ -876,6 +1003,23 @@ function routeSlug() {
   }
 }
 
+/** A year with a single project jumps straight into it, so going back there would bounce here again. */
+async function pointBackPastLoneYear(year) {
+  try {
+    const response = await fetch(`/api/projects?year=${year}`);
+    if (!response.ok) return;
+    const { projects } = await response.json();
+    if (!Array.isArray(projects) || projects.length > 1) return;
+  } catch {
+    return;
+  }
+  for (const crumb of crumbs) {
+    const back = crumb.querySelector('.back');
+    back.href = '/';
+    back.setAttribute('aria-label', 'Elegir otro grado');
+  }
+}
+
 async function openProject(slug) {
   let response = null;
   try {
@@ -903,6 +1047,7 @@ async function openProject(slug) {
     chips[i].dataset.g = grade;
     chips[i].textContent = grade;
   });
+  if (project.listed) pointBackPastLoneYear(project.year);
   // Entering a project always starts at the picker, even when reloading a board.
   if (history.state?.grade) history.replaceState(null, '');
   showLanding();
