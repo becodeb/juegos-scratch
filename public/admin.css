@@ -999,7 +999,8 @@ button.pip:active > span {
 }
 
 .ybtn[data-y='3'][aria-pressed='true'],
-.ybtn[data-y='4'][aria-pressed='true'] {
+.ybtn[data-y='4'][aria-pressed='true'],
+.ybtn[data-y='steamlab'][aria-pressed='true'] {
   background: var(--fill);
   color: var(--on);
   box-shadow: inset 0 0 0 2px var(--edge);

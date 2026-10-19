@@ -17,7 +17,14 @@ const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
 // School years and the divisions inside each. A grade is year + letter: 3N, 4F...
 const YEARS = [3, 4];
 const DIVISIONS = ['N', 'F', 'S'];
-const gradesOf = (year) => DIVISIONS.map((letter) => `${year}${letter}`);
+// STEAMLab is a third, hidden course: its project has no division, just the one grade 'steamlab'.
+const STEAMLAB = 'steamlab';
+const COURSES = [3, 4, STEAMLAB];
+const isCourse = (year) => COURSES.includes(year);
+const hasDivisions = (year) => year !== STEAMLAB;
+const gradesOf = (year) => (hasDivisions(year) ? DIVISIONS.map((letter) => `${year}${letter}`) : [STEAMLAB]);
+/** 3° and STEAMLab boards offer a "your name" field; 4° does not. */
+const hasNameField = (year) => year === 3 || year === STEAMLAB;
 // Projects saved before years existed were all 4th grade.
 const LEGACY_YEAR = 4;
 const MAX_BODY_BYTES = 4 * 1024;
@@ -25,12 +32,13 @@ const MAX_LIST = 300;
 const MAX_TITLE = 120;
 const MAX_PROJECT_TITLE = 60;
 const MAX_SLUG = 40;
+const MAX_NAME = 40;
 const SCRATCH_TIMEOUT_MS = 10000;
 
 const SLUG_SHAPE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 // Top-level paths the app uses itself, so no project can take them.
-// (Purely numeric slugs are reserved too: /3 and /4 are the year pages.)
-const RESERVED_SLUGS = new Set(['admin', 'api', 'fonts']);
+// (Purely numeric slugs are reserved too: /3 and /4 are the year pages, /steamlab the hidden one.)
+const RESERVED_SLUGS = new Set(['admin', 'api', 'fonts', STEAMLAB]);
 const isReservedSlug = (slug) => RESERVED_SLUGS.has(slug) || /^\d+$/.test(slug);
 // Games saved before projects existed land here, unlisted.
 const LEGACY_PROJECT = { slug: 'primeros-juegos', title: 'Primeros juegos' };
@@ -74,6 +82,8 @@ const ERR_SLUG_SHAPE = 'La dirección solo puede tener letras sin tildes, númer
 const ERR_SLUG_EMPTY = 'Elegí una dirección con letras o números.';
 const ERR_SLUG_RESERVED = 'Esa dirección está reservada. Elegí otra.';
 const ERR_SLUG_TAKEN = 'Ya hay un proyecto con esa dirección.';
+const ERR_COURSE = 'Elegí 3°, 4° o STEAMLab.';
+const ERR_NO_NAME_FIELD = 'Este proyecto no tiene campo de nombre.';
 
 // Scratch's default thumbnail (the cat alone on a white stage) as a 12x9 grid of mean RGB,
 // measured from two real default thumbnails. One line per grid row.
@@ -112,6 +122,8 @@ let writeChain = Promise.resolve();
  */
 function prettify(username) {
   const raw = String(username ?? '');
+  // STEAMLab kids use personal Scratch accounts, not `surname-given`: no dash, no reshaping.
+  if (!raw.includes('-')) return raw;
   const parts = raw
     .split(/[-_]+/)
     .filter(Boolean)
@@ -194,7 +206,7 @@ function freeSlug(base) {
 function migrate() {
   let changed = false;
   for (const project of projects) {
-    if (YEARS.includes(project.year)) continue;
+    if (isCourse(project.year)) continue;
     project.year = LEGACY_YEAR;
     changed = true;
   }
@@ -370,15 +382,28 @@ function listGames(project, grade) {
     .map(publicGame);
 }
 
-/** Listed projects, newest first; only one school year when `year` is given. */
+function projectSummary(project) {
+  const own = gamesOf(project);
+  return { slug: project.slug, title: project.title, year: project.year, count: own.length, recent: coverIds(own) };
+}
+
+/**
+ * Listed projects, newest first; only one school year when `year` is given. STEAMLab never
+ * shows up here (it is not part of the public showcase, listed or not).
+ */
 function listProjects(year) {
   return projects
-    .filter((project) => project.listed && (!year || project.year === year))
+    .filter((project) => project.listed && project.year !== STEAMLAB && (!year || project.year === year))
     .sort(newestProjectFirst)
-    .map((project) => {
-      const own = gamesOf(project);
-      return { slug: project.slug, title: project.title, year: project.year, count: own.length, recent: coverIds(own) };
-    });
+    .map(projectSummary);
+}
+
+/** Every STEAMLab project, listed or not: the hidden `/steamlab` URL is the gate, not that flag. */
+function listSteamlabProjects() {
+  return projects
+    .filter((project) => project.year === STEAMLAB)
+    .sort(newestProjectFirst)
+    .map(projectSummary);
 }
 
 async function fetchProject(id) {
@@ -442,6 +467,9 @@ async function handleCreate(req, res) {
   if (!owner) return sendJson(res, 404, { error: ERR_NO_PROJECT });
   if (!gradesOf(owner.year).includes(grade)) return sendJson(res, 400, { error: ERR_WRONG_YEAR });
 
+  // The name field only exists on 3° and STEAMLab boards; a 4° client never sends it.
+  const typedName = typeof body?.name === 'string' ? body.name.trim().slice(0, MAX_NAME) : '';
+
   const project = await fetchProject(id);
   if (!project.ok) {
     return sendJson(res, project.status, {
@@ -460,7 +488,12 @@ async function handleCreate(req, res) {
     // Sending the same link again must not undo a fix made in /admin.
     if (!existing.titleLocked) existing.title = title;
     existing.author = project.author;
-    if (!existing.nameLocked) existing.name = prettify(project.author);
+    if (typedName) {
+      existing.name = typedName;
+      existing.nameLocked = true;
+    } else if (!existing.nameLocked) {
+      existing.name = prettify(project.author);
+    }
     game = existing;
     status = 200;
   } else {
@@ -468,11 +501,12 @@ async function handleCreate(req, res) {
       id,
       title,
       author: project.author,
-      name: prettify(project.author),
+      name: typedName || prettify(project.author),
       grade,
       addedAt: new Date().toISOString(),
       project: owner.id,
     };
+    if (typedName) game.nameLocked = true;
     // The same Scratch project may already be classified in another project or grade.
     const twin = games.find((entry) => entry.id === id && entry.thumb);
     if (twin) Object.assign(game, { thumb: twin.thumb, thumbCheckedAt: twin.thumbCheckedAt });
@@ -491,6 +525,56 @@ async function handleCreate(req, res) {
   return sendJson(res, status, { game: publicGame(game) });
 }
 
+/**
+ * Public counterpart to the admin's game rename, for the name field on 3° and STEAMLab
+ * boards: patches the name of a game a kid just added (or is resubmitting), without the
+ * admin session. Any other field (grade, title…) still only moves through /admin.
+ */
+async function handleNameUpdate(req, res) {
+  let raw;
+  try {
+    raw = await readBody(req);
+  } catch (error) {
+    if (error?.code === 'TOO_LARGE') {
+      res.setHeader('Connection', 'close');
+      sendJson(res, 413, { error: ERR_BAD_LINK });
+      req.resume();
+      return;
+    }
+    return sendJson(res, 400, { error: ERR_BAD_LINK });
+  }
+
+  let body;
+  try {
+    body = JSON.parse(raw || '{}');
+  } catch {
+    return sendJson(res, 400, { error: ERR_BAD_LINK });
+  }
+
+  const owner = typeof body?.project === 'string' ? projectBySlug(body.project) : undefined;
+  if (!owner) return sendJson(res, 404, { error: ERR_NO_PROJECT });
+  if (!hasNameField(owner.year)) return sendJson(res, 400, { error: ERR_NO_NAME_FIELD });
+
+  const grade = typeof body?.grade === 'string' ? body.grade : '';
+  if (!gradesOf(owner.year).includes(grade)) return sendJson(res, 400, { error: ERR_NO_GRADE });
+
+  const id = typeof body?.id === 'string' ? body.id : '';
+  const game = findGame(owner, grade, id);
+  if (!game) return sendJson(res, 404, { error: ERR_ADMIN_GONE });
+
+  const name = typeof body?.name === 'string' ? body.name.trim().slice(0, MAX_NAME) : '';
+  if (!name) return sendJson(res, 400, { error: 'El nombre no puede quedar vacío.' });
+
+  game.name = name;
+  game.nameLocked = true;
+  try {
+    await persist();
+  } catch {
+    return sendJson(res, 500, { error: ERR_SAVE });
+  }
+  return sendJson(res, 200, { game: publicGame(game) });
+}
+
 function handlePublicApi(req, res, url) {
   const { pathname, searchParams } = url;
   if (pathname === '/api/games') {
@@ -501,8 +585,11 @@ function handlePublicApi(req, res, url) {
     return sendJson(res, 200, { games: listGames(project, grade) });
   }
   if (pathname === '/api/projects') {
-    // ?year=3 or ?year=4 narrows the list; without it, every listed project.
-    const year = Number(searchParams.get('year'));
+    const yearParam = searchParams.get('year');
+    // The hidden URL is STEAMLab's gate, so this ignores `listed` entirely.
+    if (yearParam === STEAMLAB) return sendJson(res, 200, { projects: listSteamlabProjects() });
+    // ?year=3 or ?year=4 narrows the list; without it, every listed project (never STEAMLab).
+    const year = Number(yearParam);
     if (searchParams.has('year') && !YEARS.includes(year)) return sendJson(res, 400, { error: ERR_ADMIN_BAD });
     return sendJson(res, 200, { projects: listProjects(YEARS.includes(year) ? year : null) });
   }
@@ -510,7 +597,8 @@ function handlePublicApi(req, res, url) {
   const project = match && projectBySlug(match[1]);
   if (project) {
     const { slug, title, year, listed } = project;
-    return sendJson(res, 200, { project: { slug, title, year, listed } }, listed ? {} : { 'X-Robots-Tag': 'noindex' });
+    const visible = listed && year !== STEAMLAB;
+    return sendJson(res, 200, { project: { slug, title, year, listed } }, visible ? {} : { 'X-Robots-Tag': 'noindex' });
   }
   if (match) return sendJson(res, 404, { error: ERR_NO_PROJECT });
   return sendJson(res, 404, { error: 'Not found' });
@@ -831,7 +919,7 @@ function readProjectChanges(body, self) {
     changes.listed = body.listed;
   }
   if (body.year !== undefined) {
-    if (!YEARS.includes(body.year)) return { status: 400, error: 'Elegí 3° o 4°.' };
+    if (!isCourse(body.year)) return { status: 400, error: ERR_COURSE };
     changes.year = body.year;
   }
   return { changes };
@@ -847,7 +935,7 @@ async function handleProjectCreate(req, res) {
   if (error) return sendJson(res, status, { error });
 
   // New projects start off the home page until the teacher lists them.
-  if (changes.year === undefined) return sendJson(res, 400, { error: 'Elegí 3° o 4°.' });
+  if (changes.year === undefined) return sendJson(res, 400, { error: ERR_COURSE });
   const project = createProject(changes.title, changes.slug, changes.listed ?? false, changes.year);
   try {
     await persist();
@@ -864,10 +952,24 @@ async function handleProjectUpdate(req, res, project) {
   if (error) return sendJson(res, status, { error });
   if (Object.keys(changes).length === 0) return sendJson(res, 400, { error: ERR_ADMIN_NOTHING });
 
-  // Games point at the project id, so a new slug leaves them untouched. A new year
-  // carries the games along: 4N becomes 3N, keeping each division.
+  // Games point at the project id, so a new slug leaves them untouched. A new course
+  // carries the games along: 4N becomes 3N, keeping each division. STEAMLab has no
+  // division, so crossing to or from it collapses onto its single grade instead.
   if (changes.year !== undefined && changes.year !== project.year) {
-    for (const game of games) if (game.project === project.id) game.grade = `${changes.year}${game.grade.slice(1)}`;
+    for (const game of games) {
+      if (game.project !== project.id) continue;
+      game.grade =
+        changes.year === STEAMLAB ? STEAMLAB : `${changes.year}${hasDivisions(project.year) ? game.grade.slice(1) : 'N'}`;
+    }
+    // Collapsing three divisions into one board can leave the same game twice: keep one.
+    const seen = new Set();
+    games = games.filter((game) => {
+      if (game.project !== project.id) return true;
+      const key = `${game.grade}/${game.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
   Object.assign(project, changes);
   try {
@@ -1047,9 +1149,12 @@ function handleAppPage(res, url) {
   }
 
   if (YEARS.map(String).includes(slug)) return sendPage(res, 'index.html', 200);
+  // /steamlab is reachable only by URL, never linked from the public showcase: noindex it.
+  if (slug === STEAMLAB) return sendPage(res, 'index.html', 200, { 'X-Robots-Tag': 'noindex' });
   const project = SLUG_SHAPE.test(slug) && !isReservedSlug(slug) ? projectBySlug(slug) : undefined;
   if (!project) return sendPage(res, 'index.html', 404, { 'X-Robots-Tag': 'noindex' });
-  return sendPage(res, 'index.html', 200, project.listed ? {} : { 'X-Robots-Tag': 'noindex' });
+  const visible = project.listed && project.year !== STEAMLAB;
+  return sendPage(res, 'index.html', 200, visible ? {} : { 'X-Robots-Tag': 'noindex' });
 }
 
 function resolveStaticPath(pathname) {
@@ -1103,6 +1208,11 @@ const server = createServer((req, res) => {
 
   if (req.method === 'POST' && pathname === '/api/games') {
     handleCreate(req, res).catch(() => sendJson(res, 500, { error: ERR_SAVE }));
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/games/name') {
+    handleNameUpdate(req, res).catch(() => sendJson(res, 500, { error: ERR_SAVE }));
     return;
   }
 

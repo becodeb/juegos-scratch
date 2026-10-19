@@ -1,7 +1,13 @@
 // Divisions inside each school year; a grade is year + letter (3N, 4F...). Colors follow the letter.
 const DIVISIONS = ['N', 'F', 'S'];
-const YEARS = [3, 4];
-const gradesOf = (year) => DIVISIONS.map((letter) => `${year}${letter}`);
+// STEAMLab is a third, hidden course: no division, just the one grade 'steamlab'.
+const STEAMLAB = 'steamlab';
+const COURSES = [3, 4, STEAMLAB];
+const gradesOf = (year) => (year === STEAMLAB ? [STEAMLAB] : DIVISIONS.map((letter) => `${year}${letter}`));
+const courseLabel = (year) => (year === STEAMLAB ? 'STEAMLab' : `${year}°`);
+const gradeLabel = (grade) => (grade === STEAMLAB ? 'STEAMLab' : grade);
+/** Reads a `data-y` attribute (always a string in the DOM) back into 3, 4 or 'steamlab'. */
+const courseOf = (value) => (value === STEAMLAB ? STEAMLAB : Number(value));
 const NS = 'http://www.w3.org/2000/svg';
 const SPRING = 'cubic-bezier(.34, 1.56, .64, 1)';
 const SETTLE = 'cubic-bezier(.2, .7, .4, 1)';
@@ -12,7 +18,7 @@ const MAX_PROJECT_TITLE = 60;
 const MAX_SLUG = 40;
 // Mirrors the server, which stays authoritative.
 const SLUG_SHAPE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const RESERVED_SLUGS = new Set(['admin', 'api', 'fonts']);
+const RESERVED_SLUGS = new Set(['admin', 'api', 'fonts', STEAMLAB]);
 
 const ERR_OFFLINE = 'No hay conexión. Probá de nuevo.';
 const ERR_SAVE = 'No se pudo guardar. Probá de nuevo.';
@@ -539,26 +545,30 @@ function buildProjectRow(project) {
   const title = el('span', 'row-title');
   title.append(el('span', 'ptitle', project.title), icon('i-caret', 'icon caret'));
   const meta = el('span', 'row-meta pmeta');
-  const chip = el('span', 'ychip', `${project.year}°`);
+  const chip = el('span', 'ychip', courseLabel(project.year));
   chip.dataset.y = project.year;
   chip.prepend(el('span', 'sr-only', 'Año '));
   meta.append(chip, ' ', el('span', 'slug', `/${project.slug}`));
   for (const grade of Object.keys(project.counts)) {
     const tally = el('span', 'tally');
     tally.dataset.g = grade;
-    tally.append(el('b', '', grade), ` ${project.counts[grade]}`);
+    tally.append(el('b', '', gradeLabel(grade)), ` ${project.counts[grade]}`);
     meta.append(' ', tally);
   }
   info.append(title, meta);
   open.append(coverOf(project), info);
 
-  const toggle = el('button', 'switch');
-  toggle.type = 'button';
-  toggle.setAttribute('role', 'switch');
-  toggle.setAttribute('aria-checked', String(project.listed));
-  toggle.setAttribute('aria-label', `Mostrar «${project.title}» en el inicio`);
-  toggle.innerHTML = '<span class="track" aria-hidden="true"><span class="knob"></span></span>';
-  toggle.append(el('span', 'switch-label', 'En el inicio'));
+  // "En el inicio" means nothing for STEAMLab: it never shows on the public showcase
+  // regardless of this flag, so the toggle would just be confusing. Hide it instead.
+  const toggle = project.year === STEAMLAB ? null : el('button', 'switch');
+  if (toggle) {
+    toggle.type = 'button';
+    toggle.setAttribute('role', 'switch');
+    toggle.setAttribute('aria-checked', String(project.listed));
+    toggle.setAttribute('aria-label', `Mostrar «${project.title}» en el inicio`);
+    toggle.innerHTML = '<span class="track" aria-hidden="true"><span class="knob"></span></span>';
+    toggle.append(el('span', 'switch-label', 'En el inicio'));
+  }
 
   const acts = el('div', 'acts');
   const copy = actButton('copy', 'i-copy', `Copiar el link de «${project.title}»`);
@@ -575,7 +585,7 @@ function buildProjectRow(project) {
   del.append(sure);
   acts.append(copy, actButton('edit', 'i-edit', `Editar «${project.title}»`), del);
 
-  row.append(open, toggle, acts);
+  row.append(open, ...(toggle ? [toggle] : []), acts);
   return row;
 }
 
@@ -590,18 +600,18 @@ function showProjects({ focusRow = null } = {}) {
   plist.replaceChildren(...items);
   pnothing.hidden = items.length > 0;
   pnothing.querySelector('.nothing-text').textContent =
-    yearFilter === 'all' ? 'Todavía no hay proyectos.' : `No hay proyectos de ${yearFilter}°.`;
+    yearFilter === 'all' ? 'Todavía no hay proyectos.' : `No hay proyectos de ${courseLabel(yearFilter)}.`;
   rise(items);
   if (focusRow) plist.querySelector(`.row[data-id="${CSS.escape(focusRow)}"] .plink`)?.focus();
 }
 
-/** A pair of 3° / 4° buttons that works like a radio group. */
+/** A row of 3° / 4° / STEAMLab buttons that works like a radio group. */
 function yearPicker(selected, label) {
   const group = el('div', 'yearpick');
   group.setAttribute('role', 'group');
   group.setAttribute('aria-label', label);
-  for (const year of YEARS) {
-    const button = el('button', 'ybtn', `${year}°`);
+  for (const year of COURSES) {
+    const button = el('button', 'ybtn', courseLabel(year));
     button.type = 'button';
     button.dataset.y = year;
     button.setAttribute('aria-pressed', String(year === selected));
@@ -610,7 +620,7 @@ function yearPicker(selected, label) {
   return group;
 }
 
-const pickedYear = (scope) => Number(scope.querySelector('.ybtn[aria-pressed="true"]')?.dataset.y);
+const pickedCourse = (scope) => courseOf(scope.querySelector('.ybtn[aria-pressed="true"]')?.dataset.y);
 
 // Year buttons anywhere in the panel: pressing one releases its siblings.
 panel.addEventListener('click', (event) => {
@@ -623,12 +633,12 @@ panel.addEventListener('click', (event) => {
 
 for (const button of yearFilters) {
   button.addEventListener('click', () => {
-    const next = button.dataset.y === 'all' ? 'all' : Number(button.dataset.y);
+    const next = button.dataset.y === 'all' ? 'all' : courseOf(button.dataset.y);
     if (next === yearFilter) return;
     yearFilter = next;
     for (const other of yearFilters) other.setAttribute('aria-pressed', String(other === button));
-    // A new project follows the year being looked at.
-    if (next !== 'all') for (const b of makerYears) b.setAttribute('aria-pressed', String(Number(b.dataset.y) === next));
+    // A new project follows the course being looked at.
+    if (next !== 'all') for (const b of makerYears) b.setAttribute('aria-pressed', String(courseOf(b.dataset.y) === next));
     unsay();
     showProjects();
   });
@@ -673,7 +683,7 @@ maker.addEventListener('submit', async (event) => {
   }
 
   maker.busy = true;
-  const year = pickedYear(maker);
+  const year = pickedCourse(maker);
   const { status, data } = await api('POST', '/api/admin/projects', { title, slug, year });
   maker.busy = false;
   if (status === 401) return expired();
@@ -696,7 +706,9 @@ maker.addEventListener('submit', async (event) => {
   pnothing.hidden = true;
   if (moving()) row.animate(POP, { duration: 320, easing: SPRING });
   flash(row);
-  announce(`Creaste «${data.project.title}» para ${data.project.year}°. Su link es ${location.origin}/${data.project.slug}.`);
+  announce(
+    `Creaste «${data.project.title}» para ${courseLabel(data.project.year)}. Su link es ${location.origin}/${data.project.slug}.`,
+  );
   // The next thing a teacher does is copy the link for the bookmarks bar.
   row.querySelector('.copy').focus();
 });
@@ -834,7 +846,7 @@ async function saveProjectEdit(row) {
   }
 
   const changes = {};
-  const year = pickedYear(row);
+  const year = pickedCourse(row);
   if (title !== project.title) changes.title = title;
   if (slug !== project.slug) changes.slug = slug;
   if (year && year !== project.year) changes.year = year;
@@ -855,9 +867,12 @@ async function saveProjectEdit(row) {
   Object.assign(project, data.project);
   const fresh = endProjectEdit(row, project, { saved: true });
   if (changes.year && project.total) {
-    say(`Ahora es de ${project.year}°: sus juegos pasaron a ${gradesOf(project.year).join(', ')}.`, fresh, fresh.querySelector('.ychip'), {
-      info: true,
-    });
+    say(
+      `Ahora es de ${courseLabel(project.year)}: sus juegos pasaron a ${gradesOf(project.year).map(gradeLabel).join(', ')}.`,
+      fresh,
+      fresh.querySelector('.ychip'),
+      { info: true },
+    );
   } else if (changes.slug) {
     // Old bookmarks now land on the not-found page, so say it plainly.
     say(`El link ahora es /${project.slug}. Copialo de nuevo para los marcadores.`, fresh, fresh.querySelector('.copy'), {
@@ -927,15 +942,15 @@ function moveButton(grade, game) {
   button.type = 'button';
   button.dataset.g = grade;
   button.dataset.move = grade;
-  button.setAttribute('aria-label', `Mover «${game.title}» a ${grade}`);
-  button.append(el('span', '', grade));
+  button.setAttribute('aria-label', `Mover «${game.title}» a ${gradeLabel(grade)}`);
+  button.append(el('span', '', gradeLabel(grade)));
   return button;
 }
 
 function currentPip(grade) {
   const pip = el('span', 'pip now');
   pip.dataset.g = grade;
-  const dot = el('span', '', grade);
+  const dot = el('span', '', gradeLabel(grade));
   dot.prepend(el('span', 'sr-only', 'Está en '));
   pip.append(dot);
   return pip;
@@ -989,6 +1004,7 @@ function updateCounts({ pop = false } = {}) {
   const counts = { all: games.length };
   for (const grade of gradesOf(current.year)) counts[grade] = games.filter((game) => game.grade === grade).length;
   for (const button of filterButtons) {
+    if (button.hidden) continue;
     const count = button.querySelector('.count');
     const next = String(counts[button.dataset.f]);
     if (count.textContent === next) continue;
@@ -1002,7 +1018,7 @@ function updateCounts({ pop = false } = {}) {
 function showNothing() {
   const empty = rows.children.length === 0;
   nothing.hidden = !empty;
-  if (empty) nothingText.textContent = filter === 'all' ? 'Todavía no hay juegos.' : `No hay juegos en ${filter}.`;
+  if (empty) nothingText.textContent = filter === 'all' ? 'Todavía no hay juegos.' : `No hay juegos en ${gradeLabel(filter)}.`;
 }
 
 function renderGames({ stagger = false } = {}) {
@@ -1022,11 +1038,15 @@ function setFilter(next) {
 async function openGames(project, ticket) {
   current = project;
   games = [];
-  // The filters speak this project's year: 3N, 3F, 3S...
-  gradesOf(project.year).forEach((grade, i) => {
-    const button = filterButtons[i + 1];
+  // The filters speak this project's course: 3N, 3F, 3S... STEAMLab has only one grade,
+  // so the other two fixed filter slots just stay hidden instead of showing stale labels.
+  const projectGrades = gradesOf(project.year);
+  filterButtons.slice(1).forEach((button, i) => {
+    const grade = projectGrades[i];
+    button.hidden = !grade;
+    if (!grade) return;
     button.dataset.f = grade;
-    button.querySelector('.label').textContent = grade;
+    button.querySelector('.label').textContent = gradeLabel(grade);
     button.querySelector('.dot').dataset.g = grade;
   });
   setFilter('all');
@@ -1068,7 +1088,7 @@ async function move(row, target) {
   const from = game.grade;
   Object.assign(game, data.game);
   updateCounts({ pop: true });
-  announce(`«${game.title}» ahora está en ${target}.`);
+  announce(`«${game.title}» ahora está en ${gradeLabel(target)}.`);
 
   if (filter !== 'all') {
     removeRow(row, '.pip[data-move]', () => filterButtons.find((b) => b.dataset.f === filter), showNothing);

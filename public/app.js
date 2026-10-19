@@ -1,6 +1,12 @@
 // Divisions inside each school year; a grade is year + letter (3N, 4F...). Colors follow the letter.
 const DIVISIONS = ['N', 'F', 'S'];
 const YEARS = ['3', '4'];
+// STEAMLab is a third, hidden course: no division, its single grade is the literal 'steamlab'.
+const STEAMLAB = 'steamlab';
+const gradesOf = (year) => (year === STEAMLAB ? [STEAMLAB] : DIVISIONS.map((letter) => `${year}${letter}`));
+const gradeLabel = (g) => (g === STEAMLAB ? 'STEAMLab' : g);
+/** 3° and STEAMLab boards offer a "your name" field; 4° does not. */
+const hasNameField = (year) => year === 3 || year === STEAMLAB;
 const NS = 'http://www.w3.org/2000/svg';
 
 const SPRING = 'cubic-bezier(.34, 1.56, .64, 1)';
@@ -38,6 +44,7 @@ const peek = form.querySelector('.peek');
 const input = form.querySelector('.slot');
 const submit = form.querySelector('.go');
 const paste = form.querySelector('.paste');
+const who = form.querySelector('.who');
 const bubble = board.querySelector('.say');
 const bubbleText = bubble.querySelector('.say-text');
 const games = board.querySelector('.games');
@@ -255,9 +262,12 @@ let project = null;
 let grade = null;
 let introUntil = 0;
 let hatDrop = null;
+/** The game `{ grade, id }` this page just added, so a later name edit knows what to patch. */
+let justAdded = null;
 
 function paintChrome(next) {
-  const colors = colorsOf(chips.find((chip) => chip.dataset.g === next));
+  // `hat` always carries the current grade's `data-g`, chips or not (STEAMLab has none).
+  const colors = colorsOf(hat);
   const svg =
     `<svg xmlns="${NS}" viewBox="-4 -34.25 108 108"><path d="${blockPath(100, 48, 1, { hat: true })}" ` +
     `fill="${colors['--fill']}" stroke="${colors['--edge']}" stroke-width="4"/></svg>`;
@@ -267,18 +277,22 @@ function paintChrome(next) {
 
 function setGrade(next) {
   grade = next;
+  // A grade change always means a different board: whatever game was just added no longer applies.
+  justAdded = null;
   root.dataset.grade = next;
   board.dataset.g = next;
   hat.dataset.g = next;
   form.dataset.g = next;
-  hatLabel.textContent = next;
+  hatLabel.textContent = gradeLabel(next);
+  who.hidden = !hasNameField(project.year);
   for (const chip of chips) chip.setAttribute('aria-pressed', String(chip.dataset.g === next));
-  document.title = `${project.title} · ${next}`;
+  document.title = `${project.title} · ${gradeLabel(next)}`;
   paintChrome(next);
 }
 
 function clearGrade() {
   grade = null;
+  justAdded = null;
   delete root.dataset.grade;
   document.title = `${project.title} · ${project.year}°`;
   favicon.href = plainIcon;
@@ -338,6 +352,17 @@ function enterBoard(next) {
   );
 }
 
+/** A STEAMLab project has one grade and no picker: open straight onto the board. */
+function enterSteamlabBoard() {
+  landing.hidden = true;
+  board.hidden = false;
+  palette.hidden = true;
+  setGrade(STEAMLAB);
+  hat.focus({ preventScroll: true });
+  if (moving()) hat.animate(HAT_DROP, { duration: 560, delay: 120, fill: 'backwards' });
+  load(STEAMLAB, { stagger: true });
+}
+
 function backToPicker() {
   const chosen = picks.find((pick) => pick.dataset.g === grade) ?? picks[0];
   loading?.abort();
@@ -365,6 +390,8 @@ function pick(event) {
 // Back from the board returns to the picker; forward goes to that board again.
 window.addEventListener('popstate', (event) => {
   if (!project || swapping) return;
+  // STEAMLab has no picker to return to: its single board never pushes a grade state.
+  if (grade === STEAMLAB) return;
   const next = event.state?.grade;
   if (grades().includes(next)) {
     if (!board.hidden) switchGrade(next, { remember: false });
@@ -842,7 +869,7 @@ form.addEventListener('submit', async (event) => {
     const response = await fetch('/api/games', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, grade: g, project: project.slug }),
+      body: JSON.stringify({ url, grade: g, project: project.slug, name: who.value.trim() }),
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.game) game = data.game;
@@ -869,8 +896,51 @@ form.addEventListener('submit', async (event) => {
   unsay();
   // A grade switch mid-request already reloaded the other list.
   if (grade !== g) return;
+  // The name field keeps its text (the same kid usually adds more); this becomes the game
+  // a later edit to that field will patch.
+  justAdded = { grade: g, id: game.id };
   await load(g, { quiet: true });
   celebrate(game);
+});
+
+/* ---------- "Tu nombre": patches the game this page just added ---------- */
+
+let nameTimer = 0;
+
+/** Sends the current name field to the game remembered in `justAdded`, if any still applies. */
+async function pushName() {
+  if (!justAdded || grade !== justAdded.grade) return;
+  const name = who.value.trim();
+  if (!name) return;
+  const target = justAdded;
+  try {
+    const response = await fetch('/api/games/name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: project.slug, grade: target.grade, id: target.id, name }),
+    });
+    // A grade switch or a fresh add while this was in flight already moved on.
+    if (response.ok && justAdded === target) await load(grade, { quiet: true });
+  } catch {
+    /* a later edit, or the next poll, will catch up */
+  }
+}
+
+who.addEventListener('input', () => {
+  clearTimeout(nameTimer);
+  nameTimer = setTimeout(pushName, 800);
+});
+
+who.addEventListener('blur', () => {
+  clearTimeout(nameTimer);
+  pushName();
+});
+
+who.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  clearTimeout(nameTimer);
+  pushName();
 });
 
 /* ---------- Home: the projects shelf ---------- */
@@ -921,7 +991,7 @@ function buildProject(entry) {
 }
 
 /** The grades of the open project: its year with each division letter. */
-const grades = () => DIVISIONS.map((letter) => `${project.year}${letter}`);
+const grades = () => gradesOf(project.year);
 
 /** `/` asks for the school year: two hats that lead to `/3` and `/4`. */
 function showYears() {
@@ -933,13 +1003,16 @@ function showYears() {
   });
 }
 
-/** `/3` and `/4`: that year's listed projects, with a quiet way back to the year picker. */
-async function showHome(year) {
+/** `/3`, `/4` and `/steamlab`: that course's projects, with a quiet way back to the year picker. */
+async function showHome(course) {
+  const isSteamlab = course === STEAMLAB;
+  const courseTitle = isSteamlab ? 'STEAMLab' : `${course}°`;
   home.hidden = false;
-  document.title = `Juegos ${year}°`;
+  document.title = `Juegos ${courseTitle}`;
   const label = homeCrumb.querySelector('.crumb-title');
-  label.textContent = `${year}°`;
+  label.textContent = courseTitle;
   label.prepend(Object.assign(document.createElement('span'), { className: 'sr-only', textContent: 'Proyectos de ' }));
+  homeCrumb.querySelector('.back').setAttribute('aria-label', isSteamlab ? 'Volver' : 'Elegir otro año');
   const skeleton = setTimeout(() => {
     shelf.replaceChildren(
       ...Array.from({ length: 3 }, () => {
@@ -953,7 +1026,7 @@ async function showHome(year) {
   }, SKELETON_DELAY);
   let list = null;
   try {
-    const response = await fetch(`/api/projects?year=${year}`);
+    const response = await fetch(`/api/projects?year=${course}`);
     if (response.ok) list = (await response.json()).projects;
   } catch {
     list = null;
@@ -963,7 +1036,7 @@ async function showHome(year) {
     shelf.replaceChildren();
     homeEmpty.hidden = false;
     homeEmpty.querySelector('.home-empty-text').textContent = list
-      ? `Todavía no hay proyectos de ${year}°.`
+      ? `Todavía no hay proyectos de ${courseTitle}.`
       : 'No se pudieron cargar los proyectos.';
     return;
   }
@@ -1020,6 +1093,20 @@ async function pointBackPastLoneYear(year) {
   }
 }
 
+/** Same idea for STEAMLab, except a lone project just hides the back link: there is no
+ * alternate course to send it to (STEAMLab is not on the `/` picker at all). */
+async function pointBackPastSteamlab() {
+  let list = null;
+  try {
+    const response = await fetch(`/api/projects?year=${STEAMLAB}`);
+    if (response.ok) list = (await response.json()).projects;
+  } catch {
+    list = null;
+  }
+  if (!Array.isArray(list) || list.length > 1) return;
+  for (const crumb of crumbs) crumb.querySelector('.back').hidden = true;
+}
+
 async function openProject(slug) {
   let response = null;
   try {
@@ -1032,13 +1119,28 @@ async function openProject(slug) {
     return;
   }
   project = (await response.json()).project;
+  const isSteamlab = project.year === STEAMLAB;
   for (const crumb of crumbs) {
     crumb.querySelector('.crumb-title').textContent = project.title;
-    // Only a listed project leads back to its year, so kids in a class project stay in it.
     const back = crumb.querySelector('.back');
-    back.hidden = !project.listed;
-    back.href = `/${project.year}`;
-    back.setAttribute('aria-label', `Ver los proyectos de ${project.year}°`);
+    if (isSteamlab) {
+      // STEAMLab projects are hidden by nature (not "listed"), so the back link always
+      // shows here unless STEAMLab itself has just this one project.
+      back.hidden = false;
+      back.href = `/${STEAMLAB}`;
+      back.setAttribute('aria-label', 'Ver los proyectos de STEAMLab');
+    } else {
+      // Only a listed project leads back to its year, so kids in a class project stay in it.
+      back.hidden = !project.listed;
+      back.href = `/${project.year}`;
+      back.setAttribute('aria-label', `Ver los proyectos de ${project.year}°`);
+    }
+  }
+  if (isSteamlab) {
+    pointBackPastSteamlab();
+    if (history.state?.grade) history.replaceState(null, '');
+    enterSteamlabBoard();
+    return;
   }
   // The grade hats and the palette speak this project's year: 3N, 3F, 3S...
   grades().forEach((grade, i) => {
@@ -1069,4 +1171,5 @@ for (const chip of chips) chip.addEventListener('click', () => switchGrade(chip.
 const slug = routeSlug();
 if (slug === null) showYears();
 else if (YEARS.includes(slug)) showHome(slug);
+else if (slug === STEAMLAB) showHome(STEAMLAB);
 else openProject(slug);

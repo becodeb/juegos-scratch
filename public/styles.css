@@ -80,6 +80,12 @@ html[data-grade$='S'] {
   --paper: #fcf3e6;
   --dot: #edd9bc;
 }
+/* STEAMLab is its own course, not a division, so it needs its own exact-match rule
+   (the suffix selectors above would never match it: it ends in 'b', not N/F/S). */
+html[data-grade='steamlab'] {
+  --paper: #e6f8f3;
+  --dot: #c3ebe0;
+}
 
 /* Division tokens (Scratch 3 category colors), matched by the grade's last letter so 3N and 4N
    share them. N is nudged darker so white labels reach 3:1;
@@ -111,6 +117,17 @@ html[data-grade$='S'] {
   --slot-edge: #8a5a00;
   --mark: #9a6208;
 }
+/* STEAMLab: Scratch's extension teal (same family the admin panel's own chrome uses), with
+   dark ink on the fill for the same reason 4S gets brown: white fails contrast on it. */
+[data-g='steamlab'] {
+  --fill: #0fbd8c;
+  --edge: #0b8e69;
+  --deep: #06533e;
+  --on: #083528;
+  --on-deep: #ffffff;
+  --slot-edge: #075c44;
+  --mark: #0b8e69;
+}
 
 @media (prefers-color-scheme: dark) {
   :root {
@@ -138,6 +155,10 @@ html[data-grade$='S'] {
     --paper: #201b1e;
     --dot: #504240;
   }
+  html[data-grade='steamlab'] {
+    --paper: #0d2420;
+    --dot: #2d5c50;
+  }
   [data-g$='N'] {
     --mark: #8db8ff;
   }
@@ -146,6 +167,9 @@ html[data-grade$='S'] {
   }
   [data-g$='S'] {
     --mark: #f5b550;
+  }
+  [data-g='steamlab'] {
+    --mark: #3dd9a8;
   }
 }
 
@@ -280,6 +304,12 @@ button {
   --fill: #ff6680;
   --edge: #ff3355;
   --on: #4a0b1c;
+}
+/* STEAMLab as a "year" (used by admin's year chip and picker, which key off data-y). */
+[data-y='steamlab'] {
+  --fill: #0fbd8c;
+  --edge: #0b8e69;
+  --on: #083528;
 }
 
 /* Landing: three giant hat blocks dropped on the canvas. */
@@ -481,6 +511,7 @@ button {
 /* The add block: link icon, white input slot, round + button. */
 .add {
   align-self: stretch;
+  flex-wrap: wrap;
   gap: calc(8px * var(--s));
   padding: calc(8px * var(--s)) calc(8px * var(--s)) calc(8px * var(--s)) calc(12px * var(--s));
   view-transition-name: add;
@@ -513,7 +544,8 @@ button {
 }
 
 .slot {
-  flex: 1 1 auto;
+  /* A zero basis keeps the slot and its buttons on one row once the add block wraps. */
+  flex: 1 1 0;
   min-width: 0;
   height: var(--slot-h);
   padding: 0 calc(11px * var(--s));
@@ -532,7 +564,29 @@ button {
   opacity: 1;
 }
 
+/* "Tu nombre": 3° and STEAMLab only (toggled in app.js). Forced onto its own line so it
+   never crowds the link slot, phone included. */
+.who {
+  flex: 1 1 100%;
+  order: 1;
+  height: var(--slot-h);
+  padding: 0 calc(11px * var(--s));
+  border: 2px solid var(--slot-edge);
+  border-radius: 999px;
+  background: #fff;
+  color: #2e3450;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.who::placeholder {
+  color: #575e75;
+  opacity: 1;
+}
+
 .slot:focus-visible,
+.who:focus-visible,
 .paste:focus-visible,
 .go:focus-visible {
   outline-color: #2e3450;
